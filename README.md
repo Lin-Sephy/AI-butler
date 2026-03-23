@@ -1,1 +1,1 @@
-# AI-butler
+# ai-butler
