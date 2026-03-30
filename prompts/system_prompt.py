@@ -154,9 +154,15 @@ def get_system_prompt(persona: str = "gentle") -> str:
 
 
 def build_user_message(user_input: str, energy_level: int,
-                       completed_tasks: list[str] | None = None) -> str:
+                       completed_tasks: list[str] | None = None,
+                       user_memo: str = "") -> str:
     """构造发给 DeepSeek 的 user message。"""
-    parts = [f"当前精力档位：{energy_level}"]
+    from datetime import datetime
+    now = datetime.now()
+    time_str = now.strftime("%H:%M")
+    parts = [f"当前时间：{time_str}　｜　精力档位：{energy_level}"]
+    if user_memo.strip():
+        parts.append(f"用户背景信息：{user_memo.strip()}")
     if completed_tasks:
         parts.append(f"今天已完成的任务：{', '.join(completed_tasks)}（参考已完成任务推荐下一步，避免重复无意义的任务，但可以推荐同类型的进阶动作）")
     parts.append(f"用户输入：{user_input}")

@@ -115,7 +115,8 @@ def _validate_fields(data: dict) -> dict:
 
 def call_ai(user_input: str, energy_level: int,
             chat_history: list | None = None, persona: str = "gentle",
-            completed_tasks: list[str] | None = None) -> dict:
+            completed_tasks: list[str] | None = None,
+            user_memo: str = "") -> dict:
     """调用 DeepSeek 完成意图判断 + 回复生成。
 
     chat_history: 最近的聊天记录列表，每项为 {"role": "user"|"assistant", "content": str}。
@@ -132,12 +133,12 @@ def call_ai(user_input: str, energy_level: int,
         client = OpenAI(
             api_key=config.DEEPSEEK_API_KEY,
             base_url=config.DEEPSEEK_BASE_URL,
-            timeout=httpx.Timeout(15.0, connect=5.0),
+            timeout=httpx.Timeout(30.0, connect=10.0),
             max_retries=1,
         )
 
         system_prompt = get_system_prompt(persona)
-        user_message = build_user_message(user_input, energy_level, completed_tasks)
+        user_message = build_user_message(user_input, energy_level, completed_tasks, user_memo)
 
         # 构造消息：system + 最近聊天历史 + 当前输入
         messages = [{"role": "system", "content": system_prompt}]

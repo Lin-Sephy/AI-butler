@@ -1,5 +1,9 @@
 import streamlit as st
-from db.database import init_db, save_action_log
+import uuid
+from db.database import (
+    init_db, save_action_log, get_user_memo, save_user_memo,
+    save_chat_message, load_session_messages,
+)
 from core.energy import get_current_energy, update_energy, ENERGY_LEVELS
 from core.intent import call_ai
 from core.rules_engine import (
@@ -22,14 +26,22 @@ st.title("AI 身体状态计划管家")
 
 # ---------- session_state 初始化 ----------
 def add_message(role: str, content: str):
-    """添加消息到 session_state。"""
+    """添加消息到 session_state 并同步存库。"""
     st.session_state.messages.append({"role": role, "content": content})
+    save_chat_message(st.session_state.session_id, role, content)
 
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "你好呀～我是小管家，你的 AI 小管家。今天想做点什么？"}
-    ]
+    saved = load_session_messages(st.session_state.session_id)
+    if saved:
+        st.session_state.messages = saved
+    else:
+        greeting = "你好呀～我是小管家，你的 AI 小管家。今天想做点什么？"
+        st.session_state.messages = [{"role": "assistant", "content": greeting}]
+        save_chat_message(st.session_state.session_id, "assistant", greeting)
 if "energy" not in st.session_state:
     st.session_state.energy = get_current_energy()
 if "last_ai_response" not in st.session_state:
@@ -153,6 +165,21 @@ with st.sidebar.expander("管理每日任务"):
             with col_del:
                 st.button("删", key=f"del_rec_{rec['id']}",
                           on_click=delete_recurring_task, args=(rec["id"],))
+
+# ---------- 记忆库（侧边栏） ----------
+st.sidebar.markdown("---")
+with st.sidebar.expander("我的记忆库"):
+    current_memo = get_user_memo()
+    new_memo = st.text_area(
+        "写下你的背景信息，小管家会记住",
+        value=current_memo,
+        placeholder="例如：我是大三学生，正在准备考研，主要科目是数学和英语。上午效率比较高，下午容易犯困。",
+        height=120,
+        key="memo_input",
+    )
+    if st.button("保存", key="btn_save_memo"):
+        save_user_memo(new_memo)
+        st.success("已保存！")
 
 
 # ---------- 错误处理 ----------
@@ -395,8 +422,10 @@ if user_input:
             with st.spinner("小管家正在想..."):
                 history = st.session_state.messages[:-1]
                 done_tasks = [t["keyword"] for t in get_today_tasks() if t["status"] == "completed"]
+                memo = get_user_memo()
                 ai_response = call_ai(user_input, energy_now, chat_history=history,
-                                      completed_tasks=done_tasks if done_tasks else None)
+                                      completed_tasks=done_tasks if done_tasks else None,
+                                      user_memo=memo)
 
                 # 精力值动态感知
                 _, needs_confirm = check_energy_drift(ai_response, energy_now)

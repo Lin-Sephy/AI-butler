@@ -24,6 +24,7 @@ def init_db():
             nickname      TEXT,
             avg_energy_7d REAL,
             persona_style TEXT DEFAULT '温柔型',
+            user_memo     TEXT DEFAULT '',
             created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -81,6 +82,7 @@ def init_db():
     c.execute("""
         CREATE TABLE IF NOT EXISTS chat_session (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   TEXT NOT NULL,
             role         TEXT NOT NULL,
             content      TEXT NOT NULL,
             session_date TEXT NOT NULL,
@@ -94,31 +96,54 @@ def init_db():
         ("default_user", "用户"),
     )
 
+    # 兼容旧表：如果 user_memo 列不存在则添加
+    try:
+        c.execute("SELECT user_memo FROM user_profile LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE user_profile ADD COLUMN user_memo TEXT DEFAULT ''")
+
+    conn.commit()
+    conn.close()
+
+
+# ---- user_memo CRUD ----
+
+def get_user_memo() -> str:
+    """获取用户记忆库内容。"""
+    conn = get_connection()
+    row = conn.execute("SELECT user_memo FROM user_profile WHERE id = 'default_user'").fetchone()
+    conn.close()
+    return row["user_memo"] if row and row["user_memo"] else ""
+
+
+def save_user_memo(memo: str) -> None:
+    """保存用户记忆库内容。"""
+    conn = get_connection()
+    conn.execute("UPDATE user_profile SET user_memo = ? WHERE id = 'default_user'", (memo,))
     conn.commit()
     conn.close()
 
 
 # ---- chat_session CRUD ----
 
-def save_chat_message(role: str, content: str) -> None:
+def save_chat_message(session_id: str, role: str, content: str) -> None:
     """保存一条聊天消息。"""
     conn = get_connection()
     today = datetime.now().strftime("%Y-%m-%d")
     conn.execute(
-        "INSERT INTO chat_session (role, content, session_date, created_at) VALUES (?, ?, ?, ?)",
-        (role, content, today, datetime.now().isoformat()),
+        "INSERT INTO chat_session (session_id, role, content, session_date, created_at) VALUES (?, ?, ?, ?, ?)",
+        (session_id, role, content, today, datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
 
 
-def load_today_messages() -> list[dict]:
-    """加载今天的所有聊天消息。"""
+def load_session_messages(session_id: str) -> list[dict]:
+    """加载指定 session 的所有聊天消息。"""
     conn = get_connection()
-    today = datetime.now().strftime("%Y-%m-%d")
     rows = conn.execute(
-        "SELECT role, content FROM chat_session WHERE session_date = ? ORDER BY created_at",
-        (today,),
+        "SELECT role, content FROM chat_session WHERE session_id = ? ORDER BY created_at",
+        (session_id,),
     ).fetchall()
     conn.close()
     return [{"role": row["role"], "content": row["content"]} for row in rows]
