@@ -1,5 +1,5 @@
 import streamlit as st
-from db.database import init_db, save_action_log, save_chat_message, load_today_messages
+from db.database import init_db, save_action_log
 from core.energy import get_current_energy, update_energy, ENERGY_LEVELS
 from core.intent import call_ai
 from core.rules_engine import (
@@ -22,19 +22,14 @@ st.title("AI 身体状态计划管家")
 
 # ---------- session_state 初始化 ----------
 def add_message(role: str, content: str):
-    """添加消息到 session_state 并同步存库。"""
+    """添加消息到 session_state。"""
     st.session_state.messages.append({"role": role, "content": content})
-    save_chat_message(role, content)
 
 
 if "messages" not in st.session_state:
-    saved = load_today_messages()
-    if saved:
-        st.session_state.messages = saved
-    else:
-        greeting = "你好呀～我是小管家，你的 AI 小管家。今天想做点什么？"
-        st.session_state.messages = [{"role": "assistant", "content": greeting}]
-        save_chat_message("assistant", greeting)
+    st.session_state.messages = [
+        {"role": "assistant", "content": "你好呀～我是小管家，你的 AI 小管家。今天想做点什么？"}
+    ]
 if "energy" not in st.session_state:
     st.session_state.energy = get_current_energy()
 if "last_ai_response" not in st.session_state:
