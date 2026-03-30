@@ -394,7 +394,9 @@ if user_input:
         with st.chat_message("assistant"):
             with st.spinner("小管家正在想..."):
                 history = st.session_state.messages[:-1]
-                ai_response = call_ai(user_input, energy_now, chat_history=history)
+                done_tasks = [t["keyword"] for t in get_today_tasks() if t["status"] == "completed"]
+                ai_response = call_ai(user_input, energy_now, chat_history=history,
+                                      completed_tasks=done_tasks if done_tasks else None)
 
                 # 精力值动态感知
                 _, needs_confirm = check_energy_drift(ai_response, energy_now)

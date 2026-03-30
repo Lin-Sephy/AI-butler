@@ -114,10 +114,12 @@ def _validate_fields(data: dict) -> dict:
 
 
 def call_ai(user_input: str, energy_level: int,
-            chat_history: list | None = None, persona: str = "gentle") -> dict:
+            chat_history: list | None = None, persona: str = "gentle",
+            completed_tasks: list[str] | None = None) -> dict:
     """调用 DeepSeek 完成意图判断 + 回复生成。
 
     chat_history: 最近的聊天记录列表，每项为 {"role": "user"|"assistant", "content": str}。
+    completed_tasks: 今天已完成的任务关键词列表。
     返回包含 willingness/status/combo/reply 等字段的 dict。
     API 失败时返回兜底响应。
     """
@@ -135,7 +137,7 @@ def call_ai(user_input: str, energy_level: int,
         )
 
         system_prompt = get_system_prompt(persona)
-        user_message = build_user_message(user_input, energy_level)
+        user_message = build_user_message(user_input, energy_level, completed_tasks)
 
         # 构造消息：system + 最近聊天历史 + 当前输入
         messages = [{"role": "system", "content": system_prompt}]
