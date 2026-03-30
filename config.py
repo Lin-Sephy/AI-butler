@@ -1,12 +1,14 @@
 import os
 
+# 优先从 st.secrets 读（Streamlit Cloud），fallback 到 .env（本地开发）
+_secrets = {}
 try:
     import streamlit as st
-    _secrets = st.secrets
+    if hasattr(st, "secrets") and len(st.secrets) > 0:
+        _secrets = st.secrets
 except Exception:
-    _secrets = {}
+    pass
 
-# 本地开发用 .env，Streamlit Cloud 用 st.secrets
 try:
     from dotenv import load_dotenv
     load_dotenv()
