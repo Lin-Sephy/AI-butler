@@ -111,6 +111,12 @@ def init_db():
     except sqlite3.OperationalError:
         c.execute("ALTER TABLE user_profile ADD COLUMN user_memo TEXT DEFAULT ''")
 
+    # 兼容旧表：如果 ai_memo 列不存在则添加
+    try:
+        c.execute("SELECT ai_memo FROM user_profile LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE user_profile ADD COLUMN ai_memo TEXT DEFAULT ''")
+
     # 兼容旧表：如果 scheduled_at 列不存在则添加
     try:
         c.execute("SELECT scheduled_at FROM task LIMIT 1")
@@ -132,9 +138,33 @@ def get_user_memo() -> str:
 
 
 def save_user_memo(memo: str) -> None:
-    """保存用户记忆库内容。"""
+    """保存用户手记内容。"""
     conn = get_connection()
     conn.execute("UPDATE user_profile SET user_memo = ? WHERE id = 'default_user'", (memo,))
+    conn.commit()
+    conn.close()
+
+
+def get_ai_memo() -> str:
+    """获取 AI 自动记忆内容。"""
+    conn = get_connection()
+    row = conn.execute("SELECT ai_memo FROM user_profile WHERE id = 'default_user'").fetchone()
+    conn.close()
+    return row["ai_memo"] if row and row["ai_memo"] else ""
+
+
+def save_ai_memo(memo: str) -> None:
+    """保存 AI 自动记忆内容。"""
+    conn = get_connection()
+    conn.execute("UPDATE user_profile SET ai_memo = ? WHERE id = 'default_user'", (memo,))
+    conn.commit()
+    conn.close()
+
+
+def clear_ai_memo() -> None:
+    """清空 AI 自动记忆。"""
+    conn = get_connection()
+    conn.execute("UPDATE user_profile SET ai_memo = '' WHERE id = 'default_user'")
     conn.commit()
     conn.close()
 
