@@ -2,7 +2,15 @@
 
 import sqlite3
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+# 北京时间 UTC+8
+_CN_TZ = timezone(timedelta(hours=8))
+
+
+def now_cn() -> datetime:
+    """返回当前北京时间。"""
+    return datetime.now(_CN_TZ)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "butler.db")
 
@@ -64,6 +72,7 @@ def init_db():
             started_at      TIMESTAMP,
             paused_at       TIMESTAMP,
             completed_at    TIMESTAMP,
+            scheduled_at    TIMESTAMP,
             created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -102,6 +111,12 @@ def init_db():
     except sqlite3.OperationalError:
         c.execute("ALTER TABLE user_profile ADD COLUMN user_memo TEXT DEFAULT ''")
 
+    # 兼容旧表：如果 scheduled_at 列不存在则添加
+    try:
+        c.execute("SELECT scheduled_at FROM task LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE task ADD COLUMN scheduled_at TIMESTAMP")
+
     conn.commit()
     conn.close()
 
@@ -129,10 +144,10 @@ def save_user_memo(memo: str) -> None:
 def save_chat_message(session_id: str, role: str, content: str) -> None:
     """保存一条聊天消息。"""
     conn = get_connection()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_cn().strftime("%Y-%m-%d")
     conn.execute(
         "INSERT INTO chat_session (session_id, role, content, session_date, created_at) VALUES (?, ?, ?, ?, ?)",
-        (session_id, role, content, today, datetime.now().isoformat()),
+        (session_id, role, content, today, now_cn().isoformat()),
     )
     conn.commit()
     conn.close()
@@ -153,7 +168,7 @@ def load_session_messages(session_id: str) -> list[dict]:
 def save_energy(energy_level: int, source: str) -> dict:
     """写入一条精力记录，返回写入结果。"""
     conn = get_connection()
-    now = datetime.now().isoformat()
+    now = now_cn().isoformat()
     conn.execute(
         "INSERT INTO energy_log (energy_level, source, created_at) VALUES (?, ?, ?)",
         (energy_level, source, now),
@@ -166,7 +181,7 @@ def save_energy(energy_level: int, source: str) -> dict:
 def get_today_energy() -> dict | None:
     """获取今天最新一条精力记录，没有则返回 None。"""
     conn = get_connection()
-    today_start = datetime.now().replace(hour=0, minute=0, second=0).isoformat()
+    today_start = now_cn().replace(hour=0, minute=0, second=0).isoformat()
     row = conn.execute(
         "SELECT energy_level, source, created_at FROM energy_log "
         "WHERE created_at >= ? ORDER BY created_at DESC LIMIT 1",
@@ -182,7 +197,7 @@ def get_today_energy() -> dict | None:
 def get_avg_energy_7d() -> float | None:
     """过去 7 天精力均值（每天取最后一条），无数据返回 None。"""
     conn = get_connection()
-    seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+    seven_days_ago = (now_cn() - timedelta(days=7)).isoformat()
     rows = conn.execute(
         "SELECT energy_level, DATE(created_at) as day "
         "FROM energy_log WHERE created_at >= ? "
@@ -213,7 +228,7 @@ def save_action_log(energy: int, intent: str, strategy: str,
     conn.execute(
         "INSERT INTO action_log (energy_at_action, intent, strategy, recommendation, user_action, timestamp) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (energy, intent, strategy, recommendation, user_action, datetime.now().isoformat()),
+        (energy, intent, strategy, recommendation, user_action, now_cn().isoformat()),
     )
     conn.commit()
     conn.close()

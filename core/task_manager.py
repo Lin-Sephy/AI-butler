@@ -1,7 +1,6 @@
 """任务管理：单任务闭环（创建 → 执行 → 暂停 → 完成/放弃）。"""
 
-from datetime import datetime
-from db.database import get_connection
+from db.database import get_connection, now_cn
 
 
 def create_task(keyword: str, combo: str, energy_level: int,
@@ -13,7 +12,7 @@ def create_task(keyword: str, combo: str, energy_level: int,
         raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
 
     conn = get_connection()
-    now = datetime.now().isoformat()
+    now = now_cn().isoformat()
 
     cursor = conn.execute(
         "INSERT INTO task (keyword, combo, energy_at_start, status, default_minutes, task_type, started_at, created_at) "
@@ -39,7 +38,7 @@ def create_task(keyword: str, combo: str, energy_level: int,
 def pause_task(task_id: int) -> dict:
     """暂停任务：executing → paused。"""
     conn = get_connection()
-    now = datetime.now().isoformat()
+    now = now_cn().isoformat()
     conn.execute(
         "UPDATE task SET status = 'paused', paused_at = ? WHERE id = ? AND status = 'executing'",
         (now, task_id),
@@ -66,7 +65,7 @@ def resume_task(task_id: int) -> dict:
 def complete_task(task_id: int) -> dict:
     """完成任务：executing/paused → completed。"""
     conn = get_connection()
-    now = datetime.now().isoformat()
+    now = now_cn().isoformat()
     conn.execute(
         "UPDATE task SET status = 'completed', completed_at = ? WHERE id = ? AND status IN ('executing', 'paused')",
         (now, task_id),
@@ -80,7 +79,7 @@ def complete_task(task_id: int) -> dict:
 def abandon_task(task_id: int) -> dict:
     """放弃任务：executing/paused → abandoned。"""
     conn = get_connection()
-    now = datetime.now().isoformat()
+    now = now_cn().isoformat()
     conn.execute(
         "UPDATE task SET status = 'abandoned', completed_at = ? WHERE id = ? AND status IN ('executing', 'paused')",
         (now, task_id),
@@ -107,7 +106,7 @@ def update_task_minutes(task_id: int, minutes: int) -> dict:
 def get_today_tasks() -> list[dict]:
     """获取今天的所有任务（不含已放弃），按创建时间倒序。"""
     conn = get_connection()
-    today_start = datetime.now().replace(hour=0, minute=0, second=0).isoformat()
+    today_start = now_cn().replace(hour=0, minute=0, second=0).isoformat()
     rows = conn.execute(
         "SELECT * FROM task WHERE created_at >= ? AND status != 'abandoned' ORDER BY created_at DESC",
         (today_start,),
@@ -175,18 +174,18 @@ def delete_recurring_task(rec_id: int) -> None:
 def spawn_daily_tasks() -> None:
     """每天首次调用时，为所有启用的循环任务生成今日 idle 任务。"""
     conn = get_connection()
-    today_start = datetime.now().replace(hour=0, minute=0, second=0).isoformat()
-    now = datetime.now().isoformat()
+    today_start = now_cn().replace(hour=0, minute=0, second=0).isoformat()
+    now = now_cn().isoformat()
 
     recurring = conn.execute(
         "SELECT * FROM recurring_task WHERE active = 1",
     ).fetchall()
 
     for rec in recurring:
-        # 检查今天是否已有未完成的（idle/executing/paused）
+        # 检查今天是否已有该循环任务（任何状态，含已完成）
         existing = conn.execute(
             "SELECT id FROM task WHERE keyword = ? AND created_at >= ? AND combo = 'recurring' "
-            "AND status IN ('idle', 'executing', 'paused')",
+            "AND status IN ('idle', 'executing', 'paused', 'completed')",
             (rec["keyword"], today_start),
         ).fetchone()
         if not existing:
@@ -207,7 +206,7 @@ def start_idle_task(task_id: int, energy_level: int) -> dict:
         raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
 
     conn = get_connection()
-    now = datetime.now().isoformat()
+    now = now_cn().isoformat()
     conn.execute(
         "UPDATE task SET status = 'executing', energy_at_start = ?, started_at = ? "
         "WHERE id = ? AND status = 'idle'",
@@ -217,6 +216,77 @@ def start_idle_task(task_id: int, energy_level: int) -> dict:
     task = _get_task_by_id(conn, task_id)
     conn.close()
     return task
+
+
+def create_scheduled_task(keyword: str, scheduled_at: str, combo: str,
+                          energy_level: int | None = None,
+                          suggested_minutes: int | None = None,
+                          task_type: str = "work") -> dict:
+    """创建一个预定任务（scheduled 状态，不立即执行）。"""
+    conn = get_connection()
+    now = now_cn().isoformat()
+    cursor = conn.execute(
+        "INSERT INTO task (keyword, combo, energy_at_start, status, default_minutes, "
+        "task_type, scheduled_at, created_at) VALUES (?, ?, ?, 'scheduled', ?, ?, ?, ?)",
+        (keyword, combo, energy_level, suggested_minutes, task_type, scheduled_at, now),
+    )
+    task_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {
+        "id": task_id, "keyword": keyword, "combo": combo,
+        "status": "scheduled", "default_minutes": suggested_minutes,
+        "task_type": task_type, "scheduled_at": scheduled_at,
+    }
+
+
+def get_scheduled_tasks() -> list[dict]:
+    """获取所有预定任务（scheduled 状态），按预定时间排序。"""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM task WHERE status = 'scheduled' ORDER BY scheduled_at",
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_due_scheduled_tasks() -> list[dict]:
+    """获取已到期的预定任务（scheduled_at <= 当前时间）。"""
+    conn = get_connection()
+    now = now_cn().isoformat()
+    rows = conn.execute(
+        "SELECT * FROM task WHERE status = 'scheduled' AND scheduled_at <= ?",
+        (now,),
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def start_scheduled_task(task_id: int, energy_level: int) -> dict:
+    """启动一个预定任务：scheduled → executing。"""
+    executing = get_executing_task()
+    if executing:
+        raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
+
+    conn = get_connection()
+    now = now_cn().isoformat()
+    conn.execute(
+        "UPDATE task SET status = 'executing', energy_at_start = ?, started_at = ? "
+        "WHERE id = ? AND status = 'scheduled'",
+        (energy_level, now, task_id),
+    )
+    conn.commit()
+    task = _get_task_by_id(conn, task_id)
+    conn.close()
+    return task
+
+
+def delete_task(task_id: int) -> None:
+    """从数据库中彻底删除一个任务。"""
+    conn = get_connection()
+    conn.execute("DELETE FROM task WHERE id = ?", (task_id,))
+    conn.commit()
+    conn.close()
 
 
 def _get_task_by_id(conn, task_id: int) -> dict:

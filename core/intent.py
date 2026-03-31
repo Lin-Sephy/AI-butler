@@ -107,6 +107,21 @@ def _validate_fields(data: dict) -> dict:
         except (TypeError, ValueError):
             data["suggested_minutes"] = None
 
+    # 校验 scheduled_at 格式
+    if data.get("scheduled_at") is not None:
+        try:
+            from datetime import datetime
+            datetime.strptime(data["scheduled_at"], "%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            data["scheduled_at"] = None
+
+    # scheduled_keyword 必须跟 scheduled_at 配对
+    if data.get("scheduled_at") is None:
+        data["scheduled_keyword"] = None
+    elif not isinstance(data.get("scheduled_keyword"), str) or not data.get("scheduled_keyword", "").strip():
+        data["scheduled_keyword"] = None
+        data["scheduled_at"] = None  # 没有关键词，预定也无效
+
     if not isinstance(data.get("reply"), str) or not data["reply"].strip():
         data["reply"] = None  # 由调用方兜底
 

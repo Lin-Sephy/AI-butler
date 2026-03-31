@@ -11,9 +11,11 @@ from core.rules_engine import (
 )
 from core.task_manager import (
     create_task, pause_task, resume_task, complete_task, abandon_task,
-    get_active_task, update_task_minutes, get_today_tasks,
+    get_active_task, update_task_minutes, get_today_tasks, delete_task,
     create_recurring_task, get_recurring_tasks, delete_recurring_task,
     spawn_daily_tasks, start_idle_task,
+    create_scheduled_task, get_scheduled_tasks, get_due_scheduled_tasks,
+    start_scheduled_task,
 )
 
 # ---------- 数据库初始化 + 每日循环任务生成 ----------
@@ -50,6 +52,10 @@ if "energy_confirm_pending" not in st.session_state:
     st.session_state.energy_confirm_pending = False  # 是否在等用户确认精力值
 if "active_task" not in st.session_state:
     st.session_state.active_task = get_active_task()  # 恢复未完成任务
+if "schedule_pending" not in st.session_state:
+    st.session_state.schedule_pending = None  # 待用户确认的预定任务
+if "schedule_dismissed" not in st.session_state:
+    st.session_state.schedule_dismissed = set()  # 用户拒绝过的预定（keyword+time）
 
 # ---------- 精力系统（侧边栏） ----------
 st.sidebar.markdown("### 今日精力")
@@ -94,6 +100,22 @@ def _on_start_idle(task_id: int):
     except ValueError:
         add_message("assistant", "你现在还有一个任务在进行中哦，先完成或放弃它再开始新的吧。")
 
+
+def _on_delete_task(task_id: int):
+    """删除任务的回调，删除后触发页面刷新。"""
+    delete_task(task_id)
+
+
+def _on_start_scheduled(task_id: int):
+    """用户点击预定任务的开始按钮。"""
+    energy_now = st.session_state.energy["energy_level"]
+    try:
+        task = start_scheduled_task(task_id, energy_now)
+        st.session_state.active_task = task
+        add_message("assistant", f"开始「{task['keyword']}」！加油～")
+    except ValueError:
+        add_message("assistant", "你现在还有一个任务在进行中哦，先完成或放弃它再开始新的吧。")
+
 # ---------- 今日任务（侧边栏） ----------
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 今日任务")
@@ -121,6 +143,19 @@ if today_tasks:
                 on_click=_on_start_idle, args=(t["id"],),
             )
 
+    # 预定任务
+    scheduled = get_scheduled_tasks()
+    if scheduled:
+        st.sidebar.markdown("**── 预定任务 ──**")
+        for t in scheduled:
+            time_label = t["scheduled_at"][5:16] if t.get("scheduled_at") else ""
+            duration_text = f" · {t['default_minutes']}min" if t.get("default_minutes") else ""
+            with st.sidebar.expander(f"🕐 {t['keyword']}　{time_label}{duration_text}"):
+                st.button("开始", key=f"start_sched_{t['id']}",
+                          on_click=_on_start_scheduled, args=(t["id"],))
+                st.button("删除", key=f"del_sched_{t['id']}",
+                          on_click=_on_delete_task, args=(t["id"],))
+
     if done:
         st.sidebar.markdown("**── 已完成 ──**")
         work_done = [t for t in done if t.get("task_type", "work") == "work"]
@@ -129,12 +164,16 @@ if today_tasks:
             st.sidebar.markdown("📚 工作/学习")
             for t in work_done:
                 duration_text = f" · {t['default_minutes']}min" if t.get("default_minutes") else ""
-                st.sidebar.markdown(f"　　✅ {t['keyword']}{duration_text}")
+                with st.sidebar.expander(f"✅ {t['keyword']}{duration_text}"):
+                    st.button("删除", key=f"del_task_{t['id']}",
+                              on_click=_on_delete_task, args=(t["id"],))
         if rest_done:
             st.sidebar.markdown("🌿 休息")
             for t in rest_done:
                 duration_text = f" · {t['default_minutes']}min" if t.get("default_minutes") else ""
-                st.sidebar.markdown(f"　　✅ {t['keyword']}{duration_text}")
+                with st.sidebar.expander(f"✅ {t['keyword']}{duration_text}"):
+                    st.button("删除", key=f"del_task_{t['id']}",
+                              on_click=_on_delete_task, args=(t["id"],))
 else:
     st.sidebar.caption("还没有任务，跟小管家聊聊吧～")
 
@@ -201,7 +240,7 @@ def safe_callback(fn):
 
 @safe_callback
 def on_accept():
-    """用户点击"开始"——创建任务并进入执行状态。"""
+    """用户点击"开始"——创建任务或预定任务。"""
     resp = st.session_state.last_ai_response
     if resp is None:
         return
@@ -349,6 +388,18 @@ def on_energy_confirm(new_level: int):
                     break
 
 
+# ---------- 到期预定任务提醒 ----------
+if "notified_scheduled" not in st.session_state:
+    st.session_state.notified_scheduled = set()
+
+due_tasks = get_due_scheduled_tasks()
+for dt in due_tasks:
+    if dt["id"] not in st.session_state.notified_scheduled:
+        time_label = dt["scheduled_at"][11:16] if dt.get("scheduled_at") else ""
+        reminder = f"你之前预定了 {time_label} 的「{dt['keyword']}」，时间到啦～要开始吗？可以在侧边栏点击开始。"
+        add_message("assistant", reminder)
+        st.session_state.notified_scheduled.add(dt["id"])
+
 # ---------- 渲染聊天历史 ----------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -368,6 +419,31 @@ if st.session_state.energy_confirm_pending:
         with cols[i]:
             st.button(label, key=f"energy_confirm_{val}",
                       on_click=on_energy_confirm, args=(val,))
+
+# ---------- 预定任务确认面板 ----------
+if st.session_state.schedule_pending is not None:
+    pending = st.session_state.schedule_pending
+    time_label = pending["scheduled_at"][5:16]
+    st.info(f"预定「{pending['keyword']}」在 {time_label}，要加入预定吗？")
+    col_yes, col_no = st.columns(2)
+    with col_yes:
+        def _confirm_schedule():
+            p = st.session_state.schedule_pending
+            create_scheduled_task(
+                keyword=p["keyword"], scheduled_at=p["scheduled_at"],
+                combo=p["combo"], energy_level=p["energy_level"],
+                suggested_minutes=p["suggested_minutes"], task_type=p["task_type"],
+            )
+            add_message("assistant", f"好的，「{p['keyword']}」已预定在 {p['scheduled_at'][5:16]}～")
+            st.session_state.schedule_pending = None
+        st.button("预定", key="btn_confirm_schedule", type="primary", on_click=_confirm_schedule)
+    with col_no:
+        def _cancel_schedule():
+            p = st.session_state.schedule_pending
+            if p:
+                st.session_state.schedule_dismissed.add(f"{p['keyword']}|{p['scheduled_at']}")
+            st.session_state.schedule_pending = None
+        st.button("不用了", key="btn_cancel_schedule", on_click=_cancel_schedule)
 
 # ---------- 任务执行面板 ----------
 if st.session_state.active_task is not None:
@@ -441,6 +517,30 @@ if user_input:
 
     # 添加回复消息
     add_message("assistant", ai_response["reply"])
+
+    # 预定任务：AI 返回 scheduled_at 时，检查是否已存在，不重复弹确认
+    if ai_response.get("scheduled_at") and ai_response.get("scheduled_keyword"):
+        # 检查是否已有同名同时间的预定任务
+        existing = get_scheduled_tasks()
+        already_exists = any(
+            t["keyword"] == ai_response["scheduled_keyword"]
+            and t.get("scheduled_at", "").startswith(ai_response["scheduled_at"])
+            for t in existing
+        )
+        dismiss_key = f"{ai_response['scheduled_keyword']}|{ai_response['scheduled_at']}"
+        if already_exists or dismiss_key in st.session_state.schedule_dismissed:
+            ai_response["scheduled_at"] = None
+            ai_response["scheduled_keyword"] = None
+
+    if ai_response.get("scheduled_at") and ai_response.get("scheduled_keyword"):
+        st.session_state.schedule_pending = {
+            "keyword": ai_response["scheduled_keyword"],
+            "scheduled_at": ai_response["scheduled_at"],
+            "combo": ai_response.get("combo", ""),
+            "energy_level": energy_now,
+            "suggested_minutes": ai_response.get("suggested_minutes"),
+            "task_type": ai_response.get("task_type", "work"),
+        }
 
     # 设置状态
     if should_show_action_buttons(ai_response):

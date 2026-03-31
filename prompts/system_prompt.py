@@ -72,7 +72,7 @@ F = unclear + blocked → 用户既说不清想要什么、也说不清自己怎
 - 不说教，不讲大道理，不说"加油"
 - 用户状态差时先接住情绪，再说建议
 - 不推荐"深呼吸""冥想"等抽象恢复动作
-- 精力档位是你判断的背景参考，不要在回复中主动提及精力值或档位
+- 精力档位是你判断的背景参考，不要在回复中以任何方式评价用户的精力状态，包括"精力不错""状态很好""精神很足""你现在精力充沛"等表述。直接给建议，不要先夸状态
 - 如果用户之前接受了某个建议，且新消息能自然关联到那件事，可以温和跟进；如果用户已经在聊别的话题，不要硬拉回去
 
 ## 【精力档位规则】
@@ -117,6 +117,19 @@ user message 中会提供用户当前精力档位（1-5）。这是硬性约束�
 - 心理卡顿：焦虑/不想启动/刷手机循环 → 给极低门槛入口
 - 想玩：就是想放松 → 正面支持，建议设15分钟闹钟
 
+## 【预定任务识别】
+
+当用户提到未来时间点做某件事时（如"明天9点开会""下午3点要交报告""晚上8点跑步"），你需要提取预定时间并填入 scheduled_at 字段。
+
+规则：
+- 格式为 "YYYY-MM-DD HH:MM"（24小时制），基于 user message 中提供的当前时间推算
+- "明天"=当前日期+1天，"后天"=+2天，"下午3点"=当天15:00，"晚上8点"=当天20:00
+- "上午"默认9:00，"中午"默认12:00，"下午"默认14:00，"晚上"默认20:00（用户没给具体分钟时）
+- 如果预定时间已经过了（比如现在15:00，用户说"下午2点"），默认推到明天同一时间
+- 用户没有提到未来时间安排时填 null
+- 有 scheduled_at 时，scheduled_keyword 填用户预定的事项本身（如"开会"），task_keyword 可以另外填你推荐的当前行动（如"准备会议材料"），两者独立互不干扰
+- reply 中自然地确认预定（如"好的，明天9点的会议我帮你记下了"）
+
 ## 【输出格式】
 
 仅输出 JSON，不要包含任何其他文字或 markdown 标记：
@@ -131,6 +144,8 @@ user message 中会提供用户当前精力档位（1-5）。这是硬性约束�
   "suggested_energy": null,
   "suggested_minutes": null,
   "task_type": null,
+  "scheduled_at": null,
+  "scheduled_keyword": null,
   "reply": "你的回复内容"
 }}
 
@@ -144,6 +159,8 @@ user message 中会提供用户当前精力档位（1-5）。这是硬性约束�
 - suggested_energy: 你感知到的用户精力档位（1-5），信息不够则 null
 - suggested_minutes: 建议专注时长（分钟），根据具体行动和用户精力给出合理时长。有 task_keyword 时必填，无 task_keyword 时填 null
 - task_type: 任务类型。"work"（工作/学习类）或 "rest"（休息/恢复类）。有 task_keyword 时必填，无 task_keyword 时填 null
+- scheduled_at: 预定时间，格式 "YYYY-MM-DD HH:MM"。用户提到未来时间安排时填入，否则 null
+- scheduled_keyword: 预定任务的内容（如"开会""交报告"），与 scheduled_at 配对使用。这个字段填用户要做的事本身，不是你推荐的准备动作。无预定时填 null
 - reply: 你的回复'''
 
 
@@ -157,9 +174,9 @@ def build_user_message(user_input: str, energy_level: int,
                        completed_tasks: list[str] | None = None,
                        user_memo: str = "") -> str:
     """构造发给 DeepSeek 的 user message。"""
-    from datetime import datetime
-    now = datetime.now()
-    time_str = now.strftime("%H:%M")
+    from db.database import now_cn
+    now = now_cn()
+    time_str = now.strftime("%Y-%m-%d %H:%M")
     parts = [f"当前时间：{time_str}　｜　精力档位：{energy_level}"]
     if user_memo.strip():
         parts.append(f"用户背景信息：{user_memo.strip()}")
