@@ -117,6 +117,12 @@ def init_db():
     except sqlite3.OperationalError:
         c.execute("ALTER TABLE user_profile ADD COLUMN ai_memo TEXT DEFAULT ''")
 
+    # 兼容旧表：如果 daily_memo 列不存在则添加
+    try:
+        c.execute("SELECT daily_memo FROM user_profile LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE user_profile ADD COLUMN daily_memo TEXT DEFAULT '{}'")
+
     # 兼容旧表：如果 scheduled_at 列不存在则添加
     try:
         c.execute("SELECT scheduled_at FROM task LIMIT 1")
@@ -165,6 +171,22 @@ def clear_ai_memo() -> None:
     """清空 AI 自动记忆。"""
     conn = get_connection()
     conn.execute("UPDATE user_profile SET ai_memo = '' WHERE id = 'default_user'")
+    conn.commit()
+    conn.close()
+
+
+def get_daily_memo() -> str:
+    """获取每日记忆 JSON 字符串。"""
+    conn = get_connection()
+    row = conn.execute("SELECT daily_memo FROM user_profile WHERE id = 'default_user'").fetchone()
+    conn.close()
+    return row["daily_memo"] if row and row["daily_memo"] else "{}"
+
+
+def save_daily_memo(memo: str) -> None:
+    """保存每日记忆 JSON 字符串。"""
+    conn = get_connection()
+    conn.execute("UPDATE user_profile SET daily_memo = ? WHERE id = 'default_user'", (memo,))
     conn.commit()
     conn.close()
 

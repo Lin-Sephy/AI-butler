@@ -38,6 +38,7 @@ def _default_response(energy_level: int, has_history: bool = False) -> dict:
         reply = FALLBACK_TEMPLATES.get(energy_level, "你好呀，今天想做点什么？")
 
     return {
+        "mode": "chat",
         "willingness": "unclear",
         "status": "blocked" if energy_level <= 2 else "ready",
         "combo": "F" if energy_level <= 2 else "C",
@@ -129,10 +130,11 @@ def _validate_fields(data: dict) -> dict:
 
 
 def call_ai(user_input: str, energy_level: int,
-            chat_history: list | None = None, persona: str = "gentle",
+            chat_history: list | None = None, persona: str = "infp",
             completed_tasks: list[str] | None = None,
             user_memo: str = "",
-            ai_memo: str = "") -> dict:
+            ai_memo: str = "",
+            daily_memo: str = "") -> dict:
     """调用 DeepSeek 完成意图判断 + 回复生成。
 
     chat_history: 最近的聊天记录列表，每项为 {"role": "user"|"assistant", "content": str}。
@@ -154,7 +156,7 @@ def call_ai(user_input: str, energy_level: int,
         )
 
         system_prompt = get_system_prompt(persona)
-        user_message = build_user_message(user_input, energy_level, completed_tasks, user_memo, ai_memo)
+        user_message = build_user_message(user_input, energy_level, completed_tasks, user_memo, ai_memo, daily_memo)
 
         # 构造消息：system + 最近聊天历史 + 当前输入
         messages = [{"role": "system", "content": system_prompt}]
@@ -180,11 +182,17 @@ def call_ai(user_input: str, energy_level: int,
         parsed = parse_ai_response(raw)
 
         if parsed is None:
-            logging.warning("[DeepSeek] JSON parse failed, using fallback")
-            return _default_response(energy_level, has_history)
+            # 不是 JSON → 聊天模式，AI 返回了纯文本
+            logging.warning("[DeepSeek] plain text response (chat mode)")
+            return {
+                "mode": "chat",
+                "reply": raw.strip(),
+            }
 
+        # JSON → 干活模式
         parsed = _validate_fields(parsed)
-        logging.warning(f"[DeepSeek] combo={parsed.get('combo')} reply={str(parsed.get('reply'))[:80]}")
+        parsed["mode"] = "task"
+        logging.warning(f"[DeepSeek] task mode combo={parsed.get('combo')} reply={str(parsed.get('reply'))[:80]}")
 
         # reply 为空时用兜底模板
         if parsed["reply"] is None:
