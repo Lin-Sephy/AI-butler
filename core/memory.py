@@ -168,10 +168,13 @@ def update_daily_memo(daily_data: dict) -> None:
 
     # 更新情绪（新情绪覆盖旧情绪）
     if daily_data.get("emotion") and daily_data["emotion"].get("value"):
+        old_emotion = current.get("emotion", {}).get("value", "")
+        is_same = daily_data["emotion"]["value"] == old_emotion
         current["emotion"] = {
             "value": daily_data["emotion"]["value"],
             "source": daily_data["emotion"].get("source", ""),
             "updated_at": now_str,
+            "mention_count": current.get("emotion", {}).get("mention_count", 0) + 1 if is_same else 1,
         }
 
     # 更新精力印象
@@ -183,23 +186,40 @@ def update_daily_memo(daily_data: dict) -> None:
 
     # 更新当前任务
     if daily_data.get("current_task"):
+        old_task = current.get("current_task", {}).get("value", "")
+        # 简单判断是否同一件事（包含关系）
+        new_task = daily_data["current_task"]
+        is_same = old_task and (old_task in new_task or new_task in old_task)
         current["current_task"] = {
-            "value": daily_data["current_task"],
+            "value": new_task,
             "updated_at": now_str,
+            "mention_count": current.get("current_task", {}).get("mention_count", 0) + 1 if is_same else 1,
         }
 
-    # 更新近期事件（追加，但去重）
+    # 更新近期事件（追加，但去重；重复提及的更新时间戳+计数）
     if daily_data.get("recent_events"):
         existing_events = current.get("recent_events", [])
-        existing_contents = {e.get("content", "") for e in existing_events}
+        existing_map = {e.get("content", ""): i for i, e in enumerate(existing_events)}
         for event in daily_data["recent_events"]:
             content = event.get("content", "")
-            if content and content not in existing_contents:
+            if not content:
+                continue
+            # 检查是否已有相似事件（包含关系匹配）
+            matched_idx = None
+            for existing_content, idx in existing_map.items():
+                if existing_content in content or content in existing_content:
+                    matched_idx = idx
+                    break
+            if matched_idx is not None:
+                existing_events[matched_idx]["updated_at"] = now_str
+                existing_events[matched_idx]["mention_count"] = existing_events[matched_idx].get("mention_count", 1) + 1
+            else:
                 existing_events.append({
                     "content": content,
                     "updated_at": now_str,
+                    "mention_count": 1,
                 })
-                existing_contents.add(content)
+                existing_map[content] = len(existing_events) - 1
         current["recent_events"] = existing_events
 
     save_daily_memo(json.dumps(current, ensure_ascii=False))
@@ -218,55 +238,44 @@ def get_filtered_daily_memo() -> str:
     now = now_cn()
     parts = []
 
-    # 情绪：2 天过期
+    from datetime import datetime
+
+    def _is_valid(item, base_days):
+        if not item or not item.get("updated_at"):
+            return False
+        try:
+            updated = datetime.strptime(item["updated_at"], "%Y-%m-%d %H:%M")
+            updated = updated.replace(tzinfo=now.tzinfo)
+            max_days = _get_expiry_days(base_days, item.get("mention_count", 1))
+            return (now - updated) <= timedelta(days=max_days)
+        except (ValueError, KeyError):
+            return False
+
+    # 情绪：基础 2 天，高频提及翻倍
     emotion = current.get("emotion")
-    if emotion and emotion.get("value"):
-        from datetime import datetime
-        try:
-            updated = datetime.strptime(emotion["updated_at"], "%Y-%m-%d %H:%M")
-            updated = updated.replace(tzinfo=now.tzinfo)
-            if (now - updated) <= timedelta(days=2):
-                source = f"（{emotion['source']}）" if emotion.get("source") else ""
-                parts.append(f"当前情绪：{emotion['value']}{source}")
-        except (ValueError, KeyError):
-            pass
+    if emotion and emotion.get("value") and _is_valid(emotion, 2):
+        source = f"（{emotion['source']}）" if emotion.get("source") else ""
+        mention = f"[提及{emotion['mention_count']}次]" if emotion.get("mention_count", 1) >= 3 else ""
+        parts.append(f"当前情绪：{emotion['value']}{source}{mention}")
 
-    # 精力印象：1 天过期
+    # 精力印象：基础 1 天
     energy = current.get("energy_impression")
-    if energy and energy.get("value") is not None:
-        from datetime import datetime
-        try:
-            updated = datetime.strptime(energy["updated_at"], "%Y-%m-%d %H:%M")
-            updated = updated.replace(tzinfo=now.tzinfo)
-            if (now - updated) <= timedelta(days=1):
-                parts.append(f"精力印象：{energy['value']}档")
-        except (ValueError, KeyError):
-            pass
+    if energy and energy.get("value") is not None and _is_valid(energy, 1):
+        parts.append(f"精力印象：{energy['value']}档")
 
-    # 当前任务：3 天过期
+    # 当前任务：基础 3 天，高频提及翻倍
     task = current.get("current_task")
-    if task and task.get("value"):
-        from datetime import datetime
-        try:
-            updated = datetime.strptime(task["updated_at"], "%Y-%m-%d %H:%M")
-            updated = updated.replace(tzinfo=now.tzinfo)
-            if (now - updated) <= timedelta(days=3):
-                parts.append(f"在做的事：{task['value']}")
-        except (ValueError, KeyError):
-            pass
+    if task and task.get("value") and _is_valid(task, 3):
+        mention = f"[提及{task['mention_count']}次]" if task.get("mention_count", 1) >= 3 else ""
+        parts.append(f"在做的事：{task['value']}{mention}")
 
-    # 近期事件：2 天过期
+    # 近期事件：基础 2 天，高频提及翻倍
     events = current.get("recent_events", [])
     valid_events = []
     for event in events:
-        from datetime import datetime
-        try:
-            updated = datetime.strptime(event["updated_at"], "%Y-%m-%d %H:%M")
-            updated = updated.replace(tzinfo=now.tzinfo)
-            if (now - updated) <= timedelta(days=2):
-                valid_events.append(event["content"])
-        except (ValueError, KeyError):
-            pass
+        if _is_valid(event, 2):
+            mention = f"[提及{event['mention_count']}次]" if event.get("mention_count", 1) >= 3 else ""
+            valid_events.append(f"{event['content']}{mention}")
     if valid_events:
         parts.append(f"近期事件：{'、'.join(valid_events)}")
 
@@ -276,17 +285,26 @@ def get_filtered_daily_memo() -> str:
     return "\n".join(parts) if parts else ""
 
 
+def _get_expiry_days(base_days: int, mention_count: int) -> int:
+    """根据提及次数延长过期天数。提及 3 次以上翻倍。"""
+    if mention_count >= 3:
+        return base_days * 2
+    return base_days
+
+
 def _cleanup_expired(memo: dict, now) -> None:
-    """清理过期的每日记忆条目。"""
+    """清理过期的每日记忆条目。提及次数高的延长保留。"""
     from datetime import datetime
     changed = False
 
-    for key, max_days in [("emotion", 2), ("energy_impression", 1), ("current_task", 3)]:
+    base_expiry = {"emotion": 2, "energy_impression": 1, "current_task": 3}
+    for key, base_days in base_expiry.items():
         item = memo.get(key)
         if item and item.get("updated_at"):
             try:
                 updated = datetime.strptime(item["updated_at"], "%Y-%m-%d %H:%M")
                 updated = updated.replace(tzinfo=now.tzinfo)
+                max_days = _get_expiry_days(base_days, item.get("mention_count", 1))
                 if (now - updated) > timedelta(days=max_days):
                     del memo[key]
                     changed = True
@@ -299,7 +317,8 @@ def _cleanup_expired(memo: dict, now) -> None:
         try:
             updated = datetime.strptime(event["updated_at"], "%Y-%m-%d %H:%M")
             updated = updated.replace(tzinfo=now.tzinfo)
-            if (now - updated) <= timedelta(days=2):
+            max_days = _get_expiry_days(2, event.get("mention_count", 1))
+            if (now - updated) <= timedelta(days=max_days):
                 valid.append(event)
         except (ValueError, KeyError):
             pass
@@ -309,6 +328,58 @@ def _cleanup_expired(memo: dict, now) -> None:
 
     if changed:
         save_daily_memo(json.dumps(memo, ensure_ascii=False))
+
+
+def bump_on_mention(user_input: str) -> None:
+    """每轮对话后调用：用户输入命中已有记忆关键词时，更新时间戳+计数。零 API 成本。"""
+    try:
+        current = json.loads(get_daily_memo())
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    if not current:
+        return
+
+    now_str = now_cn().strftime("%Y-%m-%d %H:%M")
+    changed = False
+
+    # 匹配情绪关键词
+    emotion = current.get("emotion")
+    if emotion and emotion.get("source"):
+        # 用 source 里的关键词匹配（如"导师催"→ 用户输入包含"导师"）
+        source_keywords = [w for w in emotion["source"] if len(w) >= 2]
+        if any(kw in user_input for kw in _extract_keywords(emotion["source"])):
+            emotion["updated_at"] = now_str
+            emotion["mention_count"] = emotion.get("mention_count", 1) + 1
+            changed = True
+
+    # 匹配当前任务
+    task = current.get("current_task")
+    if task and task.get("value"):
+        if any(kw in user_input for kw in _extract_keywords(task["value"])):
+            task["updated_at"] = now_str
+            task["mention_count"] = task.get("mention_count", 1) + 1
+            changed = True
+
+    # 匹配近期事件
+    for event in current.get("recent_events", []):
+        content = event.get("content", "")
+        if content and any(kw in user_input for kw in _extract_keywords(content)):
+            event["updated_at"] = now_str
+            event["mention_count"] = event.get("mention_count", 1) + 1
+            changed = True
+
+    if changed:
+        save_daily_memo(json.dumps(current, ensure_ascii=False))
+        logging.info(f"[Memory] 关键词命中，已更新提及计数")
+
+
+def _extract_keywords(text: str) -> list[str]:
+    """从文本中提取 2 字以上的关键词片段用于匹配。"""
+    # 简单策略：按常见分隔符切分，保留 2 字以上的片段
+    import re
+    segments = re.split(r'[，。、！？\s,.\-/()（）]+', text)
+    return [s for s in segments if len(s) >= 2]
 
 
 def update_ai_memory(chat_history: list) -> bool:

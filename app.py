@@ -5,7 +5,7 @@ from db.database import (
     get_ai_memo, clear_ai_memo,
     save_chat_message, load_session_messages,
 )
-from core.memory import update_ai_memory, get_filtered_daily_memo
+from core.memory import update_ai_memory, get_filtered_daily_memo, bump_on_mention
 from core.energy import get_current_energy, update_energy, ENERGY_LEVELS
 from core.intent import call_ai
 from core.rules_engine import (
@@ -648,6 +648,12 @@ if user_input:
     else:
         # 聊天模式：不展示按钮，不触发校验
         st.session_state.last_ai_response = None
+
+    # 每轮轻量匹配：用户输入命中已有记忆关键词时更新计数（零 API 成本）
+    try:
+        bump_on_mention(user_input)
+    except Exception as e:
+        logging.error(f"记忆关键词匹配失败: {type(e).__name__}: {e}")
 
     # 每 5 轮用户消息触发一次 AI 记忆更新
     st.session_state.msg_count += 1
