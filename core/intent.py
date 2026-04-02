@@ -1,10 +1,18 @@
-"""DeepSeek 单次调用：意图判断 + 回复生成（v2 架构）。"""
+"""DeepSeek 调用 v4：聊天 + 任务分离架构。
+
+- call_chat()：自然聊天 + 输出观察信号，每轮都调用
+- call_task()：给出具体任务建议，仅 Python 判断需要时调用
+"""
 
 import json
+import logging
 import httpx
 from openai import OpenAI
 import config
-from prompts.system_prompt import get_system_prompt, build_user_message
+from prompts.system_prompt import (
+    get_chat_prompt, get_task_prompt,
+    build_chat_message, build_task_message,
+)
 
 # ---- API 调用参数 ----
 API_CONFIG = {
@@ -14,7 +22,7 @@ API_CONFIG = {
     "top_p": 0.9,
 }
 
-# ---- API 完全不可用时的兜底 ----
+# ---- 兜底 ----
 FALLBACK_TEMPLATES = {
     5: "你现在状态不错！想做点什么吗？",
     4: "状态还行，想做什么跟我说～",
@@ -23,145 +31,106 @@ FALLBACK_TEMPLATES = {
     1: "你现在最需要的是休息。先睡一觉或者出去走走，其他的等恢复了再说。",
 }
 
-
 MID_CHAT_FALLBACK = "网络开小差了，你刚才说的我没接住——能再说一次吗？"
 
+EMPTY_SIGNAL = {
+    "energy_impression": None,
+    "emotion": None,
+    "mentioned_activity": None,
+    "activity_category": None,
+    "user_attitude": None,
+    "scheduled_time": None,
+}
 
-def _default_response(energy_level: int, has_history: bool = False) -> dict:
-    """API 完全失败时的兜底响应。
 
-    has_history=True 时说明是对话中途超时，用承接性回复而非冷启动模板。
+def _get_client() -> OpenAI:
+    """创建 OpenAI 客户端。"""
+    return OpenAI(
+        api_key=config.DEEPSEEK_API_KEY,
+        base_url=config.DEEPSEEK_BASE_URL,
+        timeout=httpx.Timeout(30.0, connect=10.0),
+        max_retries=1,
+    )
+
+
+def _parse_chat_response(raw: str) -> dict:
+    """解析聊天响应：纯文本回复 + 信号块。
+
+    格式：
+        聊天回复文本
+
+        ---signal---
+        {"energy_impression": ..., ...}
     """
-    if has_history:
-        reply = MID_CHAT_FALLBACK
-    else:
-        reply = FALLBACK_TEMPLATES.get(energy_level, "你好呀，今天想做点什么？")
+    signal = dict(EMPTY_SIGNAL)
+    reply = raw.strip()
 
-    return {
-        "mode": "chat",
-        "willingness": "unclear",
-        "status": "blocked" if energy_level <= 2 else "ready",
-        "combo": "F" if energy_level <= 2 else "C",
-        "state_tags": [],
-        "task_keyword": None,
-        "resistance_source": "none",
-        "suggested_energy": None,
-        "reply": reply,
-    }
-
-
-def parse_ai_response(raw_text: str) -> dict | None:
-    """解析 AI 返回的 JSON，带容错。"""
-    try:
-        return json.loads(raw_text)
-    except json.JSONDecodeError:
-        pass
-
-    cleaned = raw_text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-    cleaned = cleaned.strip()
-
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        return None
-
-
-def _validate_fields(data: dict) -> dict:
-    """校验并修正字段值。"""
-    valid_willingness = {"want", "resist", "unclear"}
-    valid_status = {"ready", "blocked"}
-    valid_combos = {"A", "B", "C", "D", "E", "F"}
-    valid_sources = {"body_signal", "env_stuffy", "mental_stuck", "want_play", "none"}
-
-    if data.get("willingness") not in valid_willingness:
-        data["willingness"] = "unclear"
-    if data.get("status") not in valid_status:
-        data["status"] = "ready"
-    if data.get("combo") not in valid_combos:
-        # 根据 willingness + status 推导 combo
-        combo_map = {
-            ("want", "ready"): "A", ("resist", "ready"): "B", ("unclear", "ready"): "C",
-            ("want", "blocked"): "D", ("resist", "blocked"): "E", ("unclear", "blocked"): "F",
-        }
-        data["combo"] = combo_map.get((data["willingness"], data["status"]), "C")
-    if not isinstance(data.get("state_tags"), list):
-        data["state_tags"] = []
-    if data.get("resistance_source") not in valid_sources:
-        data["resistance_source"] = "none"
-    if data.get("suggested_energy") is not None:
+    if "---signal---" in raw:
+        parts = raw.split("---signal---", 1)
+        reply = parts[0].strip()
         try:
-            val = int(data["suggested_energy"])
-            data["suggested_energy"] = max(1, min(5, val))
-        except (TypeError, ValueError):
-            data["suggested_energy"] = None
-    if data.get("task_type") not in ("work", "rest", None):
-        data["task_type"] = "work"
+            signal_text = parts[1].strip()
+            # 去掉可能的 markdown 代码块标记
+            if signal_text.startswith("```"):
+                signal_text = signal_text.split("\n", 1)[1] if "\n" in signal_text else signal_text[3:]
+            if signal_text.endswith("```"):
+                signal_text = signal_text[:-3]
+            signal_text = signal_text.strip()
+            parsed = json.loads(signal_text)
+            # 只取已知字段
+            for key in EMPTY_SIGNAL:
+                if key in parsed and parsed[key] is not None:
+                    signal[key] = parsed[key]
+        except (json.JSONDecodeError, IndexError) as e:
+            logging.warning(f"[Chat] 信号解析失败: {e}")
 
-    if data.get("suggested_minutes") is not None:
+    # 验证 energy_impression
+    if signal["energy_impression"] is not None:
         try:
-            val = int(data["suggested_minutes"])
-            data["suggested_minutes"] = max(5, min(120, val))
+            val = int(signal["energy_impression"])
+            signal["energy_impression"] = max(1, min(5, val))
         except (TypeError, ValueError):
-            data["suggested_minutes"] = None
+            signal["energy_impression"] = None
 
-    # 校验 scheduled_at 格式
-    if data.get("scheduled_at") is not None:
-        try:
-            from datetime import datetime
-            datetime.strptime(data["scheduled_at"], "%Y-%m-%d %H:%M")
-        except (TypeError, ValueError):
-            data["scheduled_at"] = None
+    # 验证 activity_category
+    if signal["activity_category"] not in ("work", "rest", "life", None):
+        signal["activity_category"] = None
 
-    # scheduled_keyword 必须跟 scheduled_at 配对
-    if data.get("scheduled_at") is None:
-        data["scheduled_keyword"] = None
-    elif not isinstance(data.get("scheduled_keyword"), str) or not data.get("scheduled_keyword", "").strip():
-        data["scheduled_keyword"] = None
-        data["scheduled_at"] = None  # 没有关键词，预定也无效
+    # 验证 user_attitude
+    if signal["user_attitude"] not in ("wants_help", "just_sharing", "frustrated", None):
+        signal["user_attitude"] = None
 
-    if not isinstance(data.get("reply"), str) or not data["reply"].strip():
-        data["reply"] = None  # 由调用方兜底
-
-    return data
+    return {"reply": reply, "signal": signal}
 
 
-def call_ai(user_input: str, energy_level: int,
-            chat_history: list | None = None, persona: str = "infp",
-            completed_tasks: list[str] | None = None,
-            user_memo: str = "",
-            ai_memo: str = "",
-            daily_memo: str = "") -> dict:
-    """调用 DeepSeek 完成意图判断 + 回复生成。
+def call_chat(user_input: str, energy_level: int,
+              chat_history: list | None = None,
+              persona: str = "infp",
+              user_memo: str = "",
+              ai_memo: str = "",
+              daily_memo: str = "",
+              task_board: str = "") -> dict:
+    """聊天调用：自然聊天 + 输出观察信号。
 
-    chat_history: 最近的聊天记录列表，每项为 {"role": "user"|"assistant", "content": str}。
-    completed_tasks: 今天已完成的任务关键词列表。
-    返回包含 willingness/status/combo/reply 等字段的 dict。
-    API 失败时返回兜底响应。
+    返回 {"reply": str, "signal": dict}
     """
     has_history = bool(chat_history)
 
     if not config.DEEPSEEK_API_KEY:
-        return _default_response(energy_level, has_history)
+        fallback = MID_CHAT_FALLBACK if has_history else FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
+        return {"reply": fallback, "signal": dict(EMPTY_SIGNAL)}
 
     try:
-        client = OpenAI(
-            api_key=config.DEEPSEEK_API_KEY,
-            base_url=config.DEEPSEEK_BASE_URL,
-            timeout=httpx.Timeout(30.0, connect=10.0),
-            max_retries=1,
+        client = _get_client()
+        system_prompt = get_chat_prompt(persona)
+        user_message = build_chat_message(
+            user_input, energy_level,
+            user_memo=user_memo, ai_memo=ai_memo,
+            daily_memo=daily_memo, task_board=task_board,
         )
 
-        system_prompt = get_system_prompt(persona)
-        user_message = build_user_message(user_input, energy_level, completed_tasks, user_memo, ai_memo, daily_memo)
-
-        # 构造消息：system + 最近聊天历史 + 当前输入
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
-            # 最多带最近 10 轮（20 条消息）
             recent = chat_history[-20:]
             for msg in recent:
                 messages.append({"role": msg["role"], "content": msg["content"]})
@@ -176,32 +145,160 @@ def call_ai(user_input: str, energy_level: int,
         )
 
         raw = resp.choices[0].message.content
-        import logging
-        logging.warning(f"[DeepSeek raw] {raw[:300]}")
+        logging.warning(f"[Chat raw] {raw[:300]}")
 
-        parsed = parse_ai_response(raw)
+        result = _parse_chat_response(raw)
 
+        if not result["reply"]:
+            result["reply"] = FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
+
+        return result
+
+    except Exception as e:
+        logging.error(f"[Chat] API 调用失败: {type(e).__name__}: {e}")
+        fallback = MID_CHAT_FALLBACK if has_history else FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
+        return {"reply": fallback, "signal": dict(EMPTY_SIGNAL)}
+
+
+def _parse_task_response(raw: str) -> dict | None:
+    """解析任务推荐的 JSON 响应。"""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+
+
+def _validate_task_fields(data: dict) -> dict:
+    """校验任务 JSON 字段。"""
+    if not isinstance(data.get("task_keyword"), str) or not data["task_keyword"].strip():
+        data["task_keyword"] = None
+
+    if data.get("task_type") not in ("work", "rest"):
+        data["task_type"] = "work"
+
+    if data.get("suggested_minutes") is not None:
+        try:
+            val = int(data["suggested_minutes"])
+            data["suggested_minutes"] = max(5, min(120, val))
+        except (TypeError, ValueError):
+            data["suggested_minutes"] = 25
+
+    if data.get("scheduled_at") is not None:
+        try:
+            from datetime import datetime
+            datetime.strptime(data["scheduled_at"], "%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            data["scheduled_at"] = None
+
+    if data.get("scheduled_at") is None:
+        data["scheduled_keyword"] = None
+    elif not isinstance(data.get("scheduled_keyword"), str) or not data.get("scheduled_keyword", "").strip():
+        data["scheduled_keyword"] = None
+        data["scheduled_at"] = None
+
+    if not isinstance(data.get("reply"), str) or not data["reply"].strip():
+        data["reply"] = None
+
+    return data
+
+
+def call_task(user_input: str, energy_level: int,
+              chat_history: list | None = None,
+              persona: str = "infp",
+              completed_tasks: list[str] | None = None,
+              context: str = "") -> dict:
+    """任务推荐调用：给出具体任务建议。
+
+    仅在 Python 判断需要推任务时调用。
+    返回包含 task_keyword/suggested_minutes/task_type/reply 等字段的 dict。
+    """
+    if not config.DEEPSEEK_API_KEY:
+        return {
+            "task_keyword": None,
+            "suggested_minutes": None,
+            "task_type": None,
+            "scheduled_at": None,
+            "scheduled_keyword": None,
+            "reply": FALLBACK_TEMPLATES.get(energy_level, "你好呀～"),
+        }
+
+    try:
+        client = _get_client()
+        system_prompt = get_task_prompt(persona)
+        user_message = build_task_message(
+            user_input, energy_level,
+            context=context,
+            completed_tasks=completed_tasks,
+        )
+
+        messages = [{"role": "system", "content": system_prompt}]
+        if chat_history:
+            recent = chat_history[-10:]
+            for msg in recent:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": user_message})
+
+        resp = client.chat.completions.create(
+            model=API_CONFIG["model"],
+            temperature=API_CONFIG["temperature"],
+            max_tokens=API_CONFIG["max_tokens"],
+            top_p=API_CONFIG["top_p"],
+            messages=messages,
+        )
+
+        raw = resp.choices[0].message.content
+        logging.warning(f"[Task raw] {raw[:300]}")
+
+        parsed = _parse_task_response(raw)
         if parsed is None:
-            # 不是 JSON → 聊天模式，AI 返回了纯文本
-            logging.warning("[DeepSeek] plain text response (chat mode)")
+            logging.warning("[Task] JSON 解析失败，使用兜底")
             return {
-                "mode": "chat",
-                "reply": raw.strip(),
+                "task_keyword": None,
+                "reply": raw.strip() or FALLBACK_TEMPLATES.get(energy_level, "你好呀～"),
             }
 
-        # JSON → 干活模式
-        parsed = _validate_fields(parsed)
-        parsed["mode"] = "task"
-        logging.warning(f"[DeepSeek] task mode combo={parsed.get('combo')} reply={str(parsed.get('reply'))[:80]}")
+        parsed = _validate_task_fields(parsed)
 
-        # reply 为空时用兜底模板
         if parsed["reply"] is None:
-            logging.warning("[DeepSeek] reply is None, using fallback template")
-            parsed["reply"] = FALLBACK_TEMPLATES.get(energy_level, "你好呀，今天想做点什么？")
+            parsed["reply"] = FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
 
         return parsed
 
     except Exception as e:
-        import logging
-        logging.error(f"DeepSeek API call failed: {type(e).__name__}: {e}")
-        return _default_response(energy_level, has_history)
+        logging.error(f"[Task] API 调用失败: {type(e).__name__}: {e}")
+        return {
+            "task_keyword": None,
+            "suggested_minutes": None,
+            "task_type": None,
+            "scheduled_at": None,
+            "scheduled_keyword": None,
+            "reply": MID_CHAT_FALLBACK,
+        }
+
+
+# ---- 兼容旧接口（过渡期） ----
+
+def call_ai(user_input: str, energy_level: int,
+            chat_history: list | None = None, persona: str = "infp",
+            completed_tasks: list[str] | None = None,
+            user_memo: str = "",
+            ai_memo: str = "",
+            daily_memo: str = "") -> dict:
+    """兼容旧 call_ai 接口，内部转发到 call_chat。"""
+    result = call_chat(user_input, energy_level,
+                       chat_history=chat_history, persona=persona,
+                       user_memo=user_memo, ai_memo=ai_memo,
+                       daily_memo=daily_memo)
+    return {"mode": "chat", "reply": result["reply"]}

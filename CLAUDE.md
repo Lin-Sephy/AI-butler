@@ -15,7 +15,7 @@
 - **前端：** Streamlit（纯 Python，MVP 阶段专用，后续迁移到 App）
 - **后端/业务逻辑：** Python 模块（独立于 Streamlit，放在 core/ 目录）
 - **数据库：** SQLite（单文件，后续可迁移到 PostgreSQL）
-- **AI 模型：** DeepSeek V3.2（聊天模式返回纯文本，干活模式返回 JSON，通过 OpenAI SDK 调用）
+- **AI 模型：** DeepSeek V3.2（聊天返回纯文本+信号，任务返回 JSON，通过 OpenAI SDK 调用）
 - **版本管理：** Git + GitHub
 
 ## 代码目录结构
@@ -30,32 +30,38 @@ ai-butler/
 ├── CLAUDE.md               # 本文件
 ├── core/
 │   ├── energy.py           # 精力系统（三级采集策略、五档定义）
-│   ├── rules_engine.py     # 规则引擎（守门校验、精力值感知、兜底回复）
-│   ├── intent.py           # DeepSeek 调用（双模式：聊天纯文本 / 干活 JSON）
+│   ├── rules_engine.py     # 规则引擎（任务触发判断、守门校验、兜底回复）
+│   ├── intent.py           # DeepSeek 调用（call_chat 聊天 + call_task 任务推荐）
 │   └── task_manager.py     # 任务状态流转 + 循环任务管理
 ├── db/
 │   ├── models.py           # 数据模型定义
 │   └── database.py         # SQLite 连接与 CRUD
 ├── prompts/
-│   └── system_prompt.py    # 统一 system prompt（意愿×状态矩阵 + 人设变量块）
+│   └── system_prompt.py    # 双 prompt（聊天 prompt + 任务 prompt + 人设变量块）
 ├── docs/                   # 产品文档（5份，详细设计参考）
 └── tests/
     └── test_rules_engine.py
 ```
 
-## 核心架构：聊天优先 + 按需干活（v3，2026-04-01）
+## 核心架构：聊天归 AI，推任务归 Python（v4，2026-04-02）
 
 ```
-用户输入 → Python 拼接 user message（精力档位 + 记忆 + 用户输入）
-         → DeepSeek 单次调用（带最近 10 轮聊天历史）
-         → AI 自己判断输出模式：
-           → 聊天模式（纯文本）→ 直接展示，不校验不展示按钮
-           → 干活模式（JSON）  → Python 守门校验 → 通过则展示 + 按钮 / 违规则模板兜底
+用户输入 → call_chat（DS 自然聊天 + 输出观察信号）
+         → Python 解析信号（energy_impression / emotion / mentioned_activity / activity_category / user_attitude）
+         → Python 判断是否触发推任务（should_trigger_task）：
+           → 不触发 → 只展示聊天回复，无按钮
+           → 触发   → call_task（DS 给出具体任务建议 JSON）→ 守门校验 → 展示回复 + 按钮
 ```
 
-**聊天模式是默认模式。** AI 在用户闲聊、倾诉、吐槽时返回纯文本。只有当用户有启动意愿时，AI 自主切换到干活模式输出 JSON。
+**核心原则：DS 只负责聊天和观察，推不推任务由 Python 决定。** 这样 DS 不会因为惦记推任务而破坏聊天自然感。
 
-**守门校验是纯 Python 代码，不调用 LLM。** 守门校验只在干活模式下触发。
+**触发规则（保守策略，不确定时不触发）：**
+- work/rest + wants_help → 触发
+- work + frustrated → 不触发（先接住情绪）
+- life + 任何 → 不触发（生活行程不管理）
+- 没提到具体事项 → 不触发
+
+**守门校验是纯 Python 代码，不调用 LLM。** 守门校验只在 call_task 结果上触发。
 
 ## 精力系统要点
 
@@ -64,35 +70,31 @@ ai-butler/
 - 精力值 = min(睡眠上限, 体感调整, 已消耗调整)
 - 用户始终可以手动覆盖
 
-## AI 输出格式（双模式）
+## AI 输出格式（双 prompt 分离）
 
-**聊天模式：** 纯文本回复，不输出 JSON。AI 在闲聊/倾诉/吐槽场景下自动选择此模式。
+**call_chat 输出：** 纯文本聊天回复 + `---signal---` 信号块
 
-**干活模式：** 用户有启动意愿时，AI 输出 JSON：
+```
+聊天回复文本
+
+---signal---
+{"energy_impression": 4, "emotion": "平静", "mentioned_activity": "写论文", "activity_category": "work", "user_attitude": "wants_help", "scheduled_time": null}
+```
+
+信号字段：energy_impression（精力感知1-5）、emotion（情绪）、mentioned_activity（提到的事项）、activity_category（work/rest/life/null）、user_attitude（wants_help/just_sharing/frustrated/null）、scheduled_time（提到的未来时间）
+
+**call_task 输出：** JSON（仅 Python 触发时调用）
 
 ```json
 {
-  "willingness": "want | resist | unclear",
-  "status": "ready | blocked",
-  "combo": "A | B | C | D | E | F",
-  "state_tags": [],
-  "task_keyword": null,
-  "resistance_source": "body_signal | env_stuffy | mental_stuck | want_play | none",
-  "suggested_energy": null,
-  "suggested_minutes": null,
-  "task_type": null,
+  "task_keyword": "具体行动",
+  "suggested_minutes": 25,
+  "task_type": "work | rest",
+  "scheduled_at": null,
+  "scheduled_keyword": null,
   "reply": "回复内容"
 }
 ```
-
-### 六种组合
-
-- **A = want + ready** → 直接给具体任务建议
-- **B = resist + ready** → 肯定已做的 + 具体恢复动作
-- **C = unclear + ready** → 有上下文信息时直接推荐，无信息时温和追问
-- **D = want + blocked** → 接住焦虑 + 极低门槛入口
-- **E = resist + blocked** → 接住情绪 + 具体恢复建议
-- **F = unclear + blocked** → 温和追问需要什么
 
 ## 推荐展示方式：对话式单推荐
 
@@ -104,9 +106,9 @@ ai-butler/
 
 ## 精力值动态感知
 
-- 仅在干活模式下触发精力感知和确认
-- AI 感知精力填入 suggested_energy，信息不够填 null
-- suggested_energy 与系统值偏差 >= 2 档时，弹出快捷按钮让用户确认
+- AI 在聊天信号中报告 energy_impression，信息不够填 null
+- energy_impression 与系统精力值偏差 >= 2 档时，弹出快捷按钮让用户确认
+- 任务栏信息也传给 DS 聊天参考，信息参考优先级：用户当轮输入 > 对话历史 > 记忆 > 任务栏
 
 ## 数据库表（SQLite）
 
@@ -132,6 +134,7 @@ ai-butler/
 | MVP 后追加 | Prompt 大幅优化（事务逻辑推荐、不评价精力、不塞示例） | ✅ 完成（2026-03-31） |
 | MVP 后追加 | 改名"小白"、5 种 MBTI 人设（侧边栏可切换）、朋友定位 | ✅ 完成（2026-04-01） |
 | MVP 后追加 | v3 架构：聊天优先+按需干活（双模式输出）、记忆系统拆分长期/每日 | ✅ 完成（2026-04-01） |
+| MVP 后追加 | v4 架构：聊天归 AI + 推任务归 Python，双 prompt 分离，任务栏信息传入 | ✅ 完成（2026-04-02） |
 
 ## MVP 已上线，后续迭代方向
 
@@ -166,6 +169,18 @@ ai-butler/
 - 休息任务完成后弹精力确认，工作任务不弹
 - API 超时兜底区分冷启动和对话中途
 - prompt 调优：combo C 有上下文时直接推荐、combo F 收窄触发条件、willingness 判断区分「不知道怎么做X」和「不知道干嘛」
+
+**v4 架构改造包含的改动（2026-04-02）：**
+- 核心架构从"AI 自主判断输出模式"改为"聊天归 AI，推任务归 Python"
+- prompt 拆分为聊天 prompt（自然聊天+信号输出）和任务 prompt（具体建议 JSON）
+- intent.py 拆为 call_chat() + call_task()，大部分时候只调用一次
+- 新增 should_trigger_task()：Python 根据信号 + 精力 + 任务栏决定是否触发推任务
+- 触发规则保守策略：work/rest + wants_help 才触发，life 类不触发，frustrated 不触发
+- 砍掉 combo、willingness、status、state_tags、resistance_source 等显式判断字段
+- 任务栏信息传给 DS 聊天参考（进行中/已暂停/待完成/已完成）
+- 信息参考优先级写入 prompt：用户当轮输入 > 对话历史 > 记忆 > 任务栏
+- 聊天 prompt 去掉"2-3句话"长度限制
+- 新增 find_matching_task()：用户提到的事项与任务栏匹配
 
 **v3 架构改造包含的改动（2026-04-01）：**
 - 核心架构从"每轮强制 JSON"改为"聊天优先，按需干活"双模式
@@ -215,6 +230,7 @@ ai-butler/
 5. **每次回复前用"Sephy，"开头。** 这样我能监测上下文是否还在。
 6. **出错时不要慌，把错误原因说清楚，给出修复方案让我确认。**
 7. **设计内容有改动时，讨论完毕后自动提示我是否要加入 CLAUDE.md。**
+8. **遇到技术障碍（编码问题、环境问题等）直接告诉我，不要反复绕圈尝试。** 很多时候我能用更简单的方式解决（比如换个文件格式）。
 
 ## 降级容错原则
 

@@ -1,5 +1,6 @@
 import streamlit as st
 import uuid
+import logging
 from db.database import (
     init_db, save_action_log, get_user_memo, save_user_memo,
     get_ai_memo, clear_ai_memo,
@@ -7,9 +8,10 @@ from db.database import (
 )
 from core.memory import update_ai_memory, get_filtered_daily_memo, bump_on_mention
 from core.energy import get_current_energy, update_energy, ENERGY_LEVELS
-from core.intent import call_ai
+from core.intent import call_chat, call_task
 from core.rules_engine import (
-    validate_reply, check_energy_drift, should_show_action_buttons, get_follow_up,
+    validate_reply, check_energy_drift, should_trigger_task,
+    should_show_action_buttons, get_follow_up, find_matching_task,
 )
 from core.task_manager import (
     create_task, pause_task, resume_task, complete_task, abandon_task,
@@ -19,6 +21,29 @@ from core.task_manager import (
     create_scheduled_task, get_scheduled_tasks, get_due_scheduled_tasks,
     start_scheduled_task,
 )
+
+# ---------- 辅助函数 ----------
+
+def build_task_board_text() -> str:
+    """构建任务栏文本，传给 DS 聊天时参考。"""
+    tasks = get_today_tasks()
+    if not tasks:
+        return ""
+    parts = []
+    executing = [t for t in tasks if t["status"] == "executing"]
+    paused = [t for t in tasks if t["status"] == "paused"]
+    completed = [t for t in tasks if t["status"] == "completed"]
+    idle = [t for t in tasks if t["status"] == "idle"]
+    if executing:
+        parts.append("进行中：" + "、".join(t["keyword"] for t in executing))
+    if paused:
+        parts.append("已暂停：" + "、".join(t["keyword"] for t in paused))
+    if idle:
+        parts.append("待完成：" + "、".join(t["keyword"] for t in idle))
+    if completed:
+        parts.append("已完成：" + "、".join(t["keyword"] for t in completed))
+    return " | ".join(parts)
+
 
 # ---------- 数据库初始化 + 每日循环任务生成 ----------
 init_db()
@@ -264,8 +289,6 @@ with st.sidebar.expander("AI 记忆"):
 
 # ---------- 错误处理 ----------
 
-import logging
-
 def safe_callback(fn):
     """回调保护装饰器，出错时显示友好提示而非崩溃。"""
     def wrapper(*args, **kwargs):
@@ -281,22 +304,22 @@ def safe_callback(fn):
 
 @safe_callback
 def on_accept():
-    """用户点击"开始"——创建任务或预定任务。"""
+    """用户点击"开始"——创建任务。"""
     resp = st.session_state.last_ai_response
     if resp is None:
         return
     energy_now = st.session_state.energy["energy_level"]
     save_action_log(
         energy=energy_now,
-        intent=resp.get("combo", ""),
-        strategy=resp.get("willingness", ""),
+        intent="",
+        strategy="",
         recommendation=resp.get("task_keyword", ""),
         user_action="accept",
     )
     task_kw = resp.get("task_keyword", "这件事")
     suggested_minutes = resp.get("suggested_minutes")
     task_type = resp.get("task_type", "work")
-    task = create_task(keyword=task_kw, combo=resp.get("combo", ""),
+    task = create_task(keyword=task_kw, combo="",
                        energy_level=energy_now, suggested_minutes=suggested_minutes,
                        task_type=task_type)
     st.session_state.active_task = task
@@ -316,8 +339,8 @@ def on_switch():
     energy_now = st.session_state.energy["energy_level"]
     save_action_log(
         energy=energy_now,
-        intent=resp.get("combo", ""),
-        strategy=resp.get("willingness", ""),
+        intent="",
+        strategy="",
         recommendation=resp.get("task_keyword", ""),
         user_action="switch",
     )
@@ -367,7 +390,7 @@ def on_complete():
         energy_now = st.session_state.energy["energy_level"]
         save_action_log(
             energy=energy_now,
-            intent=task.get("combo", ""),
+            intent="",
             strategy="",
             recommendation=task.get("keyword", ""),
             user_action="complete",
@@ -387,7 +410,7 @@ def on_abandon():
         energy_now = st.session_state.energy["energy_level"]
         save_action_log(
             energy=energy_now,
-            intent=task.get("combo", ""),
+            intent="",
             strategy="",
             recommendation=task.get("keyword", ""),
             user_action="abandon",
@@ -484,7 +507,7 @@ if st.session_state.schedule_pending is not None:
             p = st.session_state.schedule_pending
             create_scheduled_task(
                 keyword=p["keyword"], scheduled_at=p["scheduled_at"],
-                combo=p["combo"], energy_level=p["energy_level"],
+                combo="", energy_level=p["energy_level"],
                 suggested_minutes=p["suggested_minutes"], task_type=p["task_type"],
             )
             add_message("assistant", f"好的，「{p['keyword']}」已预定在 {p['scheduled_at'][5:16]}～")
@@ -546,25 +569,20 @@ if st.session_state.get("pending_switch"):
                 history = st.session_state.messages[:-1]
                 done_tasks = [t["keyword"] for t in get_today_tasks() if t["status"] == "completed"]
                 switch_input = f"用户拒绝了「{rejected}」，请推荐一个不同的具体行动"
-                memo = get_user_memo()
-                ai_memo_text = get_ai_memo()
-                daily_memo_text = get_filtered_daily_memo()
-                new_resp = call_ai(switch_input, energy_now, chat_history=history,
-                                   persona=st.session_state.persona,
-                                   completed_tasks=done_tasks if done_tasks else None,
-                                   user_memo=memo, ai_memo=ai_memo_text,
-                                   daily_memo=daily_memo_text)
-                # 换推荐走干活模式校验（不管 AI 返回什么模式）
-                if new_resp.get("mode") == "task":
-                    is_valid, final_reply = validate_reply(new_resp, energy_now)
-                    if not is_valid:
-                        new_resp["reply"] = final_reply
+                new_resp = call_task(switch_input, energy_now,
+                                    chat_history=history,
+                                    persona=st.session_state.persona,
+                                    completed_tasks=done_tasks if done_tasks else None,
+                                    context=f"用户拒绝了「{rejected}」")
+                is_valid, final_reply = validate_reply(new_resp, energy_now)
+                if not is_valid:
+                    new_resp["reply"] = final_reply
     except Exception as e:
         logging.error(f"换推荐失败: {type(e).__name__}: {e}")
-        new_resp = {"mode": "chat", "reply": "换推荐时出了点问题，你跟我说说想做什么吧～"}
+        new_resp = {"reply": "换推荐时出了点问题，你跟我说说想做什么吧～"}
 
     add_message("assistant", new_resp["reply"])
-    if new_resp.get("mode") == "task" and should_show_action_buttons(new_resp):
+    if should_show_action_buttons(new_resp):
         st.session_state.last_ai_response = new_resp
     else:
         st.session_state.last_ai_response = None
@@ -582,71 +600,109 @@ if user_input:
 
     energy_now = st.session_state.energy["energy_level"]
 
-    # AI 思考中显示加载提示
-    needs_confirm = False
+    # ===== 第一步：聊天调用 =====
+    chat_result = None
     try:
         with st.chat_message("assistant"):
             with st.spinner("小白正在想..."):
                 history = st.session_state.messages[:-1]
-                done_tasks = [t["keyword"] for t in get_today_tasks() if t["status"] == "completed"]
                 memo = get_user_memo()
                 ai_memo_text = get_ai_memo()
                 daily_memo_text = get_filtered_daily_memo()
-                ai_response = call_ai(user_input, energy_now, chat_history=history,
-                                      persona=st.session_state.persona,
-                                      completed_tasks=done_tasks if done_tasks else None,
-                                      user_memo=memo, ai_memo=ai_memo_text,
-                                      daily_memo=daily_memo_text)
+                task_board_text = build_task_board_text()
+                chat_result = call_chat(
+                    user_input, energy_now,
+                    chat_history=history,
+                    persona=st.session_state.persona,
+                    user_memo=memo, ai_memo=ai_memo_text,
+                    daily_memo=daily_memo_text,
+                    task_board=task_board_text,
+                )
     except Exception as e:
-        logging.error(f"AI 处理流程出错: {type(e).__name__}: {e}")
-        ai_response = {"mode": "chat", "reply": "哎呀，出了点小问题。你再说一次？"}
+        logging.error(f"聊天调用出错: {type(e).__name__}: {e}")
+        chat_result = {"reply": "哎呀，出了点小问题。你再说一次？", "signal": {}}
 
-    # 根据 mode 走不同分支
-    if ai_response.get("mode") == "task":
-        # 干活模式：走守门校验 + 精力感知 + 按钮 + 预定任务
-        _, needs_confirm = check_energy_drift(ai_response, energy_now)
-        is_valid, final_reply = validate_reply(ai_response, energy_now)
-        if not is_valid:
-            ai_response["reply"] = final_reply
+    signal = chat_result.get("signal", {})
 
-    # 添加回复消息
-    add_message("assistant", ai_response["reply"])
+    # 展示聊天回复
+    add_message("assistant", chat_result["reply"])
 
-    # 以下只在干活模式下处理
-    if ai_response.get("mode") == "task":
-        # 预定任务：AI 返回 scheduled_at 时，检查是否已存在，不重复弹确认
-        if ai_response.get("scheduled_at") and ai_response.get("scheduled_keyword"):
-            existing = get_scheduled_tasks()
-            already_exists = any(
-                t["keyword"] == ai_response["scheduled_keyword"]
-                and t.get("scheduled_at", "").startswith(ai_response["scheduled_at"])
-                for t in existing
+    # ===== 第二步：精力偏差检测 =====
+    _, needs_confirm = check_energy_drift(signal, energy_now)
+    if needs_confirm:
+        st.session_state.energy_confirm_pending = True
+
+    # ===== 第三步：Python 判断是否触发推任务 =====
+    today_tasks = get_today_tasks()
+    trigger = should_trigger_task(signal, energy_now, today_tasks)
+
+    if trigger:
+        # 触发第二次调用：任务推荐
+        try:
+            done_tasks = [t["keyword"] for t in today_tasks if t["status"] == "completed"]
+            # 构建上下文：最近几轮对话摘要
+            recent_context = "\n".join(
+                f"{'用户' if m['role'] == 'user' else '小白'}: {m['content']}"
+                for m in (history or [])[-6:]
             )
-            dismiss_key = f"{ai_response['scheduled_keyword']}|{ai_response['scheduled_at']}"
-            if already_exists or dismiss_key in st.session_state.schedule_dismissed:
-                ai_response["scheduled_at"] = None
-                ai_response["scheduled_keyword"] = None
+            task_resp = call_task(
+                user_input, energy_now,
+                chat_history=history,
+                persona=st.session_state.persona,
+                completed_tasks=done_tasks if done_tasks else None,
+                context=recent_context,
+            )
+            # 守门校验
+            is_valid, final_reply = validate_reply(task_resp, energy_now)
+            if not is_valid:
+                task_resp["reply"] = final_reply
 
-        if ai_response.get("scheduled_at") and ai_response.get("scheduled_keyword"):
-            st.session_state.schedule_pending = {
-                "keyword": ai_response["scheduled_keyword"],
-                "scheduled_at": ai_response["scheduled_at"],
-                "combo": ai_response.get("combo", ""),
-                "energy_level": energy_now,
-                "suggested_minutes": ai_response.get("suggested_minutes"),
-                "task_type": ai_response.get("task_type", "work"),
-            }
+            # 展示任务推荐回复（替换聊天回复）
+            if task_resp.get("reply"):
+                # 替换最后一条 assistant 消息
+                for i in range(len(st.session_state.messages) - 1, -1, -1):
+                    if st.session_state.messages[i]["role"] == "assistant":
+                        st.session_state.messages[i]["content"] = task_resp["reply"]
+                        break
 
-        # 设置按钮状态
-        if should_show_action_buttons(ai_response):
-            st.session_state.last_ai_response = ai_response
-        else:
+            # 预定任务处理
+            if task_resp.get("scheduled_at") and task_resp.get("scheduled_keyword"):
+                existing = get_scheduled_tasks()
+                already_exists = any(
+                    t["keyword"] == task_resp["scheduled_keyword"]
+                    and t.get("scheduled_at", "").startswith(task_resp["scheduled_at"])
+                    for t in existing
+                )
+                dismiss_key = f"{task_resp['scheduled_keyword']}|{task_resp['scheduled_at']}"
+                if not already_exists and dismiss_key not in st.session_state.schedule_dismissed:
+                    st.session_state.schedule_pending = {
+                        "keyword": task_resp["scheduled_keyword"],
+                        "scheduled_at": task_resp["scheduled_at"],
+                        "combo": "",
+                        "energy_level": energy_now,
+                        "suggested_minutes": task_resp.get("suggested_minutes"),
+                        "task_type": task_resp.get("task_type", "work"),
+                    }
+
+            # 设置按钮状态
+            if should_show_action_buttons(task_resp):
+                st.session_state.last_ai_response = task_resp
+            else:
+                st.session_state.last_ai_response = None
+
+        except Exception as e:
+            logging.error(f"任务推荐调用出错: {type(e).__name__}: {e}")
             st.session_state.last_ai_response = None
-
-        if needs_confirm:
-            st.session_state.energy_confirm_pending = True
     else:
-        # 聊天模式：不展示按钮，不触发校验
+        # 不触发推任务：检查用户是否提到已有任务（如"做完xx了"）
+        mentioned = signal.get("mentioned_activity")
+        if mentioned and signal.get("user_attitude") == "just_sharing":
+            match = find_matching_task(mentioned, today_tasks)
+            if match and match["status"] in ("executing", "paused"):
+                # 用户可能在说完成了某个进行中的任务，但不自动标记，
+                # 让用户手动点完成更安全
+                pass
+
         st.session_state.last_ai_response = None
 
     # 每轮轻量匹配：用户输入命中已有记忆关键词时更新计数（零 API 成本）
