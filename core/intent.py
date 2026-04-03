@@ -135,8 +135,8 @@ def call_chat(user_input: str, energy_level: int,
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
             if session_summary:
-                # 有摘要：只传最近 5 条，摘要已包含在 user_message 里
-                recent = chat_history[-5:]
+                # 有摘要：传最近 10 条（5 轮），摘要覆盖更早的上下文
+                recent = chat_history[-10:]
             else:
                 recent = chat_history[-20:]
             for msg in recent:
