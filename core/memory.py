@@ -84,13 +84,18 @@ def _save_impressions(impressions: list[dict]) -> None:
 
 
 def get_confirmed_impressions_text() -> str:
-    """获取深入印象的可读文本，传给聊天 prompt。只返回 confirmed 级别的。"""
+    """获取印象的可读文本，传给聊天 prompt。confirmed 和 draft 都传，标注区分。"""
     impressions = _get_impressions()
     confirmed = [imp for imp in impressions if imp.get("level") == "confirmed"]
-    if not confirmed:
+    drafts = [imp for imp in impressions if imp.get("level") == "draft"]
+    if not confirmed and not drafts:
         return ""
-    lines = [imp["content"] for imp in confirmed]
-    return "背景参考（仅供你内心判断用，不要在对话中直接提及）：\n" + "\n".join(f"- {line}" for line in lines)
+    lines = []
+    for imp in confirmed:
+        lines.append(f"- {imp['content']}")
+    for imp in drafts:
+        lines.append(f"- {imp['content']}（初步印象，可能不准）")
+    return "背景参考（仅供你内心判断用，不要在对话中直接提及）：\n" + "\n".join(lines)
 
 
 def get_impressions_display() -> str:
