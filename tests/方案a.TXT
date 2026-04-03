@@ -1,0 +1,28 @@
+小白你好呀
+我们收到用户消息“小白你好呀”。这是打招呼，用户没有提到任务，也没有负面情绪。根据CHAT_PROMPT，我们需要作为朋友自然聊天，输出聊天回复和JSON信号块。用户精力档位未知，情绪似乎是友好开心的。不需要推任务。回复应简单友好，符合小白的人设（默认infp？但系统提示里小白是用户的朋友，我们作为小白回复）。注意原则：不说教，不评价。简单问候即可。输出格式：聊天回复纯文本，然后---signal---，然后JSON。
+
+哈喽～今天心情不错的样子？
+---signal---
+{"energy_impression": null, "emotion": "开心", "mentioned_activity": null, "activity_category": null, "user_attitude": null, "scheduled_time": null}
+
+我今天打算写论文
+我们正在聊天模式。用户说“我今天打算写论文”。需要生成聊天回复和信号块。信号中mentioned_activity是“写论文”，activity_category是work，user_attitude是just_sharing（用户只是告知打算，没有明确求助）。energy_impression未知，emotion平静？看起来比较正常。回复要自然朋友语气，不带说教。可以用intp人设？默认可能是infp？但系统prompt里说“你是小白”，用户之前叫小白你好呀。persona没有指定，使用默认infp？但用户没有选，按照代码默认是infp。回复应温和共情。可以说“写论文啊，今天精力够吗？”但不要评价精力状态，可以说“打算写多久？”或者“加油”不能说。简单回应即可。
+
+写论文啊，今天思路顺不顺？要是卡住了可以先列个大纲垫垫。
+---signal---
+{"energy_impression": null, "emotion": "平静", "mentioned_activity": "写论文", "activity_category": "work", "user_attitude": "just_sharing", "scheduled_time": null}
+
+还行吧，有点不顺。我得改一下预答辩的点，但是不知道从哪改起
+我们用户说“还行吧，有点不顺”，然后具体提到改预答辩的点，不知道从哪改起。这属于任务卡顿，用户可能需要具体建议。根据聊天模式，我们作为小白要自然聊天，同时输出信号。用户表达了困扰（wants_help？因为他说“不知道从哪改起”，暗示需要帮助）。情绪可能是焦虑或烦恼。精力档位未给，暂且null。mentioned_activity是“改预答辩的点”。activity_category work。user_attitude应该是wants_help。scheduled_time没有。回复要像朋友一样，不说教，可以给猜测性建议。例如：“是不是先看看评委的反馈意见？或者把问题拆成小点一个个来？” 注意不要长篇大论。
+
+是不是先看看评委的反馈意见，把最常被提到的那条先拎出来改？
+---signal---
+{"energy_impression": null, "emotion": "焦虑", "mentioned_activity": "改预答辩的点", "activity_category": "work", "user_attitude": "wants_help", "scheduled_time": null}
+
+哎呀，暂时还没准备好嘛
+我们注意到用户说“暂时还没准备好”，情绪可能是逃避或抵触。作为朋友，需要接住情绪，不施加压力，可以轻松一点回应。同时根据原则，不说教、不讲大道理。可以顺着用户的话，表示理解，同时给一个极低门槛的选项，比如只是看看文档或者打开文件。注意精力档位未知，但用户没有说累，所以不用特别考虑。回复要自然。
+
+那就先放着呗，等心里踏实点了再看也不迟。
+---signal---
+{"energy_impression": null, "emotion": "烦躁", "mentioned_activity": "改预答辩的点", "activity_category": "work", "user_attitude": "frustrated", "scheduled_time": null}
+

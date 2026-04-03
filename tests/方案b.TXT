@@ -1,0 +1,31 @@
+小白你好！
+（用户用“小白你好！”跟我打招呼，语气挺轻松的，看来是准备开始聊天了。从这句简单的问候里还看不出具体的情绪或意图，可能就是日常打招呼，或者想看看我什么反应。）
+
+（作为小白，我应该用自然随和的语气回应，不用太正式。用户既然主动叫我名字，我可以顺势问一句“怎么了”或者“有什么想聊的”，这样既回应了问候，又给用户一个接话的入口。不用急着去分析什么信号，先正常聊着就好。）
+
+嘿，怎么了？看你主动叫我，是想聊聊还是有什么事？
+
+---signal---
+{"energy_impression": null, "emotion": "平静", "mentioned_activity": null, "activity_category": null, "user_attitude": null, "offer_help": false, "scheduled_time": null}
+
+我今天打算写论文
+我们判断：用户明确说了“打算写论文”，有明确的行动意图。按照新增的offer_help规则，应该输出true。聊天回复保持自然。
+
+写论文啊，那你是想让我帮你规划一下还是自己来？
+
+---signal---
+{"energy_impression": null, "emotion": "平静", "mentioned_activity": "写论文", "activity_category": "work", "user_attitude": "wants_help", "offer_help": true, "scheduled_time": null}
+
+我得改一下预答辩的点，但是不知道从哪改起
+我们判断用户有明确行动意图（需要帮助安排任务），offer_help应为true。用户表达了想做某事但不知道从哪开始，符合wants_help。需要生成任务建议。根据TASK_PROMPT，需要输出JSON。用户精力档位未提供，但在调用时会有。假设精力档位未知？按照规则，如果用户没说，系统会提供。这里作为模拟，假设精力档位3档？最好用默认。但作为小白，应该根据对话给出具体建议。用户说的是改预答辩的点，不知道从哪改起。建议：先列出预答辩反馈意见中的具体问题点，或者打开文档看一遍标记。任务类型work，建议分钟数比如25分钟。回复要带人设（intp？默认infp？用户之前没有指定人设，但从系统prompt看可能是infp？但小白的人设是哪个？实际上在CHAT_PROMPT中用了persona_block，但用户没有选。默认应该是infp。不过作为任务推荐，根据规则输出JSON即可。我作为AI助手，应该输出JSON。
+
+{"task_keyword": "列出预答辩反馈中的具体修改点", "suggested_minutes": 25, "task_type": "work", "scheduled_at": null, "scheduled_keyword": null, "reply": "先别管怎么改，把你收到的反馈意见里那几条具体问题抄出来，一条一条列清楚再说下一步。"}
+
+我暂时还没准备好嘛
+我们注意到用户说“我暂时还没准备好嘛”，这可能是对之前建议的抗拒或拖延。需要根据精力档位判断。但用户没有提供精力档位，假设一般情况。按照规则，如果用户状态差或抗拒，应该先接住情绪，不强迫。聊天模式下应该自然回应。同时信号块中注意用户态度可能是just_sharing或frustrated。用户表达了没准备好，说明可能不是wants_help。所以offer_help应为false。回复要温和，不施压。
+
+那就不急着动手呗，什么时候觉得能开始了再叫我。
+
+---signal---
+{"energy_impression": null, "emotion": "疲惫", "mentioned_activity": "改预答辩的点", "activity_category": "work", "user_attitude": "frustrated", "offer_help": false, "scheduled_time": null}
+

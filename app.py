@@ -3,10 +3,10 @@ import uuid
 import logging
 from db.database import (
     init_db, save_action_log, get_user_memo, save_user_memo,
-    get_ai_memo, clear_ai_memo,
+    clear_ai_memo,
     save_chat_message, load_session_messages,
 )
-from core.memory import update_ai_memory, get_filtered_daily_memo, bump_on_mention
+from core.memory import update_ai_memory, get_filtered_daily_memo, bump_on_mention, get_confirmed_impressions_text, get_impressions_display
 from core.energy import get_current_energy, update_energy, ENERGY_LEVELS
 from core.intent import call_chat, call_task
 from core.rules_engine import (
@@ -85,8 +85,6 @@ if "schedule_dismissed" not in st.session_state:
     st.session_state.schedule_dismissed = set()  # 用户拒绝过的预定（keyword+time）
 if "msg_count" not in st.session_state:
     st.session_state.msg_count = 0  # 用户消息计数，每 10 轮触发记忆更新
-if "pending_switch" not in st.session_state:
-    st.session_state.pending_switch = None  # "换一个"待处理标记
 
 # ---------- 小白人设（侧边栏） ----------
 PERSONA_OPTIONS = {
@@ -275,12 +273,12 @@ with st.sidebar.expander("我的手记"):
         st.success("已保存！")
 
 with st.sidebar.expander("AI 记忆"):
-    ai_memo = get_ai_memo()
-    if ai_memo.strip():
-        st.markdown(ai_memo)
+    impressions_text = get_impressions_display()
+    if impressions_text:
+        st.markdown(impressions_text)
     else:
         st.caption("小白还没记住什么，聊几轮就会自动学习～")
-    if ai_memo.strip():
+    if impressions_text:
         if st.button("清空 AI 记忆", key="btn_clear_ai_memo"):
             clear_ai_memo()
             st.success("已清空！")
@@ -304,7 +302,7 @@ def safe_callback(fn):
 
 @safe_callback
 def on_accept():
-    """用户点击"开始"——创建任务。"""
+    """用户点击"记录"——写入任务栏，不直接开始。"""
     resp = st.session_state.last_ai_response
     if resp is None:
         return
@@ -314,25 +312,23 @@ def on_accept():
         intent="",
         strategy="",
         recommendation=resp.get("task_keyword", ""),
-        user_action="accept",
+        user_action="record",
     )
     task_kw = resp.get("task_keyword", "这件事")
     suggested_minutes = resp.get("suggested_minutes")
     task_type = resp.get("task_type", "work")
-    task = create_task(keyword=task_kw, combo="",
-                       energy_level=energy_now, suggested_minutes=suggested_minutes,
-                       task_type=task_type)
-    st.session_state.active_task = task
+    create_task(keyword=task_kw, combo="",
+                energy_level=energy_now, suggested_minutes=suggested_minutes,
+                task_type=task_type, auto_start=False)
 
-    duration_text = f"建议专注 {task['default_minutes']} 分钟" if task["default_minutes"] else "不设时长限制，按自己节奏来"
-    add_message("assistant", f"好的，开始「{task_kw}」！{duration_text}，随时可以暂停或完成～")
+    add_message("assistant", f"已记录「{task_kw}」，想做的时候在侧边栏点开始就行～")
     st.session_state.last_ai_response = None
     st.session_state.switch_count = 0
 
 
 @safe_callback
 def on_switch():
-    """用户点击"换一个"——标记状态，由主流程处理。"""
+    """用户点击"再聊聊"——清除推荐，回到纯聊天。"""
     resp = st.session_state.last_ai_response
     if resp is None:
         return
@@ -342,22 +338,10 @@ def on_switch():
         intent="",
         strategy="",
         recommendation=resp.get("task_keyword", ""),
-        user_action="switch",
+        user_action="continue_chat",
     )
-
-    switch_count = st.session_state.get("switch_count", 0) + 1
-    st.session_state.switch_count = switch_count
-
-    if switch_count >= 2:
-        # 第二次换：追问用户想做什么
-        follow_up = get_follow_up()
-        add_message("assistant", follow_up)
-        st.session_state.last_ai_response = None
-        st.session_state.switch_count = 0
-    else:
-        # 第一次换：标记待处理，由主流程调 API
-        st.session_state.pending_switch = resp.get("task_keyword", "")
-        st.session_state.last_ai_response = None
+    st.session_state.last_ai_response = None
+    st.session_state.switch_count = 0
 
 
 @safe_callback
@@ -552,41 +536,10 @@ elif st.session_state.last_ai_response is not None and not st.session_state.ener
     if should_show_action_buttons(resp):
         col1, col2 = st.columns(2)
         with col1:
-            st.button("开始", key="btn_accept", type="primary", on_click=on_accept)
+            st.button("记录", key="btn_accept", type="primary", on_click=on_accept)
         with col2:
-            st.button("换一个", key="btn_switch", on_click=on_switch)
+            st.button("再聊聊", key="btn_switch", on_click=on_switch)
 
-# ---------- 处理"换一个"的 AI 调用 ----------
-if st.session_state.get("pending_switch"):
-    rejected = st.session_state.pending_switch
-    st.session_state.pending_switch = None
-    add_message("assistant", "好的，换一个～")
-
-    energy_now = st.session_state.energy["energy_level"]
-    try:
-        with st.chat_message("assistant"):
-            with st.spinner("小白正在想..."):
-                history = st.session_state.messages[:-1]
-                done_tasks = [t["keyword"] for t in get_today_tasks() if t["status"] == "completed"]
-                switch_input = f"用户拒绝了「{rejected}」，请推荐一个不同的具体行动"
-                new_resp = call_task(switch_input, energy_now,
-                                    chat_history=history,
-                                    persona=st.session_state.persona,
-                                    completed_tasks=done_tasks if done_tasks else None,
-                                    context=f"用户拒绝了「{rejected}」")
-                is_valid, final_reply = validate_reply(new_resp, energy_now)
-                if not is_valid:
-                    new_resp["reply"] = final_reply
-    except Exception as e:
-        logging.error(f"换推荐失败: {type(e).__name__}: {e}")
-        new_resp = {"reply": "换推荐时出了点问题，你跟我说说想做什么吧～"}
-
-    add_message("assistant", new_resp["reply"])
-    if should_show_action_buttons(new_resp):
-        st.session_state.last_ai_response = new_resp
-    else:
-        st.session_state.last_ai_response = None
-    st.rerun()
 
 # ---------- 用户输入 ----------
 user_input = st.chat_input("跟我说说你现在的状态或想做的事...")
@@ -607,7 +560,7 @@ if user_input:
             with st.spinner("小白正在想..."):
                 history = st.session_state.messages[:-1]
                 memo = get_user_memo()
-                ai_memo_text = get_ai_memo()
+                ai_memo_text = get_confirmed_impressions_text()
                 daily_memo_text = get_filtered_daily_memo()
                 task_board_text = build_task_board_text()
                 chat_result = call_chat(

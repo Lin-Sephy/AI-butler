@@ -5,19 +5,24 @@ from db.database import get_connection, now_cn
 
 def create_task(keyword: str, combo: str, energy_level: int,
                 suggested_minutes: int | None = None,
-                task_type: str = "work") -> dict:
-    """创建并立即开始一个任务。同时只允许一个 executing 任务。"""
-    executing = get_executing_task()
-    if executing:
-        raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
+                task_type: str = "work",
+                auto_start: bool = True) -> dict:
+    """创建任务。auto_start=True 立即开始，False 则放入待完成（idle）。"""
+    status = "executing" if auto_start else "idle"
+
+    if auto_start:
+        executing = get_executing_task()
+        if executing:
+            raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
 
     conn = get_connection()
     now = now_cn().isoformat()
+    started_at = now if auto_start else None
 
     cursor = conn.execute(
         "INSERT INTO task (keyword, combo, energy_at_start, status, default_minutes, task_type, started_at, created_at) "
-        "VALUES (?, ?, ?, 'executing', ?, ?, ?, ?)",
-        (keyword, combo, energy_level, suggested_minutes, task_type, now, now),
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (keyword, combo, energy_level, status, suggested_minutes, task_type, started_at, now),
     )
     task_id = cursor.lastrowid
     conn.commit()
@@ -28,10 +33,10 @@ def create_task(keyword: str, combo: str, energy_level: int,
         "keyword": keyword,
         "combo": combo,
         "energy_at_start": energy_level,
-        "status": "executing",
+        "status": status,
         "default_minutes": suggested_minutes,
         "task_type": task_type,
-        "started_at": now,
+        "started_at": started_at,
     }
 
 

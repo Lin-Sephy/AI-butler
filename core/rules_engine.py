@@ -33,7 +33,7 @@ def should_trigger_task(signal: dict, energy_level: int, task_board: list[dict])
         return False
 
     # 用户明确想让你帮忙安排 → 触发
-    if attitude == "wants_help" and category in ("work", "rest"):
+    if attitude == "wants_help" and category == "work":
         return True
 
     # 用户只是在说/告知 → 不触发
