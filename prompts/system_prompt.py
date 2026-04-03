@@ -169,12 +169,15 @@ def build_chat_message(user_input: str, energy_level: int,
                        user_memo: str = "",
                        ai_memo: str = "",
                        daily_memo: str = "",
-                       task_board: str = "") -> str:
+                       task_board: str = "",
+                       session_summary: str = "") -> str:
     """构建聊天模式的 user message。"""
     from db.database import now_cn
     now = now_cn()
     time_str = now.strftime("%Y-%m-%d %H:%M")
     parts = [f"当前时间：{time_str}"]
+    if session_summary.strip():
+        parts.append(f"对话摘要：{session_summary.strip()}")
     if user_memo.strip():
         parts.append(f"用户手记：{user_memo.strip()}")
     if ai_memo.strip():

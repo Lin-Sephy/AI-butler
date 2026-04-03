@@ -30,10 +30,13 @@ HIGH_FREQ_DECAY_DAYS = 30
 
 # ---- 提取 Prompt ----
 
-EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印象，并判断已有印象是否被强化或推翻。
+EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印象，并判断已有印象是否被强化或推翻。同时生成一份对话摘要。
 
 已有印象：
 {existing_impressions}
+
+上一轮对话摘要：
+{previous_summary}
 
 返回 JSON，不要包含其他内容：
 {{
@@ -43,7 +46,8 @@ EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印
   "daily": {{
     "emotion": {{"value": "情绪", "source": "原因"}} 或 null,
     "current_task": "在做的事" 或 null
-  }}
+  }},
+  "session_summary": "用2-3句话概括当前对话的整体状态：聊了什么话题、用户情绪和意图、有什么待办或决定。要涵盖之前的摘要内容，不要丢失旧信息"
 }}
 
 规则：
@@ -54,7 +58,8 @@ EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印
 - 已有印象与当前对话矛盾时放入 contradicted
 - 没有新发现时 new_impressions 为空数组
 - daily 是当前状态快照：emotion 是此刻情绪，current_task 是当前在做的事
-- 如果对话中没有情绪或任务相关信息，daily 对应字段填 null"""
+- 如果对话中没有情绪或任务相关信息，daily 对应字段填 null
+- session_summary 必须始终填写，即使对话很短"""
 
 
 # ---- 印象存取 ----
@@ -117,10 +122,13 @@ def _format_existing_impressions(impressions: list[dict]) -> str:
 
 # ---- 核心流程 ----
 
-def extract_and_update(chat_history: list) -> bool:
-    """从对话中提取印象 + 更新每日快照。返回是否有更新。"""
+def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
+    """从对话中提取印象 + 更新每日快照 + 生成会话摘要。
+
+    返回 {"updated": bool, "session_summary": str}
+    """
     if not config.DEEPSEEK_API_KEY or not chat_history:
-        return False
+        return {"updated": False, "session_summary": previous_summary}
 
     impressions = _get_impressions()
 
@@ -139,7 +147,8 @@ def extract_and_update(chat_history: list) -> bool:
         )
 
         prompt = EXTRACT_PROMPT.format(
-            existing_impressions=_format_existing_impressions(impressions)
+            existing_impressions=_format_existing_impressions(impressions),
+            previous_summary=previous_summary or "（暂无）",
         )
 
         resp = client.chat.completions.create(
@@ -158,7 +167,7 @@ def extract_and_update(chat_history: list) -> bool:
 
     except Exception as e:
         logging.error(f"[Memory] 提取失败: {type(e).__name__}: {e}")
-        return False
+        return {"updated": False, "session_summary": previous_summary}
 
     now = now_cn()
     today = now.strftime("%Y-%m-%d")
@@ -232,7 +241,10 @@ def extract_and_update(chat_history: list) -> bool:
         _update_daily_memo(daily)
         updated = True
 
-    return updated
+    # 会话摘要
+    session_summary = result.get("session_summary", "") or previous_summary
+
+    return {"updated": updated, "session_summary": session_summary}
 
 
 def _apply_decay(impressions: list[dict], now) -> list[dict]:
@@ -376,6 +388,9 @@ def _extract_keywords(text: str) -> list[str]:
 
 # ---- 兼容旧接口 ----
 
-def update_ai_memory(chat_history: list) -> bool:
-    """兼容旧调用，内部转发到 extract_and_update。"""
-    return extract_and_update(chat_history)
+def update_ai_memory(chat_history: list, previous_summary: str = "") -> dict:
+    """入口函数：提取印象 + 每日快照 + 会话摘要。
+
+    返回 {"updated": bool, "session_summary": str}
+    """
+    return extract_and_update(chat_history, previous_summary=previous_summary)

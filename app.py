@@ -84,7 +84,9 @@ if "schedule_pending" not in st.session_state:
 if "schedule_dismissed" not in st.session_state:
     st.session_state.schedule_dismissed = set()  # 用户拒绝过的预定（keyword+time）
 if "msg_count" not in st.session_state:
-    st.session_state.msg_count = 0  # 用户消息计数，每 10 轮触发记忆更新
+    st.session_state.msg_count = 0  # 用户消息计数，每 5 轮触发记忆更新
+if "session_summary" not in st.session_state:
+    st.session_state.session_summary = ""  # 会话摘要，压缩长对话上下文
 
 # ---------- 小白人设（侧边栏） ----------
 PERSONA_OPTIONS = {
@@ -570,6 +572,7 @@ if user_input:
                     user_memo=memo, ai_memo=ai_memo_text,
                     daily_memo=daily_memo_text,
                     task_board=task_board_text,
+                    session_summary=st.session_state.session_summary,
                 )
     except Exception as e:
         logging.error(f"聊天调用出错: {type(e).__name__}: {e}")
@@ -664,11 +667,15 @@ if user_input:
     except Exception as e:
         logging.error(f"记忆关键词匹配失败: {type(e).__name__}: {e}")
 
-    # 每 5 轮用户消息触发一次 AI 记忆更新
+    # 每 5 轮用户消息触发一次 AI 记忆更新 + 会话摘要
     st.session_state.msg_count += 1
     if st.session_state.msg_count % 5 == 0:
         try:
-            update_ai_memory(st.session_state.messages)
+            mem_result = update_ai_memory(
+                st.session_state.messages,
+                previous_summary=st.session_state.session_summary,
+            )
+            st.session_state.session_summary = mem_result.get("session_summary", "")
         except Exception as e:
             logging.error(f"AI 记忆更新失败: {type(e).__name__}: {e}")
 

@@ -109,9 +109,11 @@ def call_chat(user_input: str, energy_level: int,
               user_memo: str = "",
               ai_memo: str = "",
               daily_memo: str = "",
-              task_board: str = "") -> dict:
+              task_board: str = "",
+              session_summary: str = "") -> dict:
     """聊天调用：自然聊天 + 输出观察信号。
 
+    有 session_summary 时用"摘要 + 最近 5 条"，否则用"最近 20 条"。
     返回 {"reply": str, "signal": dict}
     """
     has_history = bool(chat_history)
@@ -127,11 +129,16 @@ def call_chat(user_input: str, energy_level: int,
             user_input, energy_level,
             user_memo=user_memo, ai_memo=ai_memo,
             daily_memo=daily_memo, task_board=task_board,
+            session_summary=session_summary,
         )
 
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
-            recent = chat_history[-20:]
+            if session_summary:
+                # 有摘要：只传最近 5 条，摘要已包含在 user_message 里
+                recent = chat_history[-5:]
+            else:
+                recent = chat_history[-20:]
             for msg in recent:
                 messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": user_message})
