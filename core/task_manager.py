@@ -6,7 +6,8 @@ from db.database import get_connection, now_cn
 def create_task(keyword: str, combo: str, energy_level: int,
                 suggested_minutes: int | None = None,
                 task_type: str = "work",
-                auto_start: bool = True) -> dict:
+                auto_start: bool = True,
+                detail: str = "") -> dict:
     """创建任务。auto_start=True 立即开始，False 则放入待完成（idle）。"""
     status = "executing" if auto_start else "idle"
 
@@ -20,9 +21,9 @@ def create_task(keyword: str, combo: str, energy_level: int,
     started_at = now if auto_start else None
 
     cursor = conn.execute(
-        "INSERT INTO task (keyword, combo, energy_at_start, status, default_minutes, task_type, started_at, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (keyword, combo, energy_level, status, suggested_minutes, task_type, started_at, now),
+        "INSERT INTO task (keyword, combo, energy_at_start, status, default_minutes, task_type, started_at, created_at, detail) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (keyword, combo, energy_level, status, suggested_minutes, task_type, started_at, now, detail),
     )
     task_id = cursor.lastrowid
     conn.commit()
@@ -37,6 +38,7 @@ def create_task(keyword: str, combo: str, energy_level: int,
         "default_minutes": suggested_minutes,
         "task_type": task_type,
         "started_at": started_at,
+        "detail": detail,
     }
 
 

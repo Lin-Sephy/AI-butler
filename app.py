@@ -191,11 +191,22 @@ if today_tasks:
         st.sidebar.markdown("**── 待完成 ──**")
         for t in idle:
             duration_text = f" · {t['default_minutes']}min" if t.get("default_minutes") else ""
-            st.sidebar.button(
-                f"⬜ {t['keyword']}{duration_text}（每日）",
-                key=f"start_idle_{t['id']}",
-                on_click=_on_start_idle, args=(t["id"],),
-            )
+            detail = t.get("detail", "")
+            if detail:
+                # 记录的任务：expander 展示摘要
+                with st.sidebar.expander(f"📝 {t['keyword']}{duration_text}"):
+                    st.caption(detail)
+                    st.button("开始", key=f"start_idle_{t['id']}",
+                              on_click=_on_start_idle, args=(t["id"],))
+                    st.button("删除", key=f"del_idle_{t['id']}",
+                              on_click=_on_delete_task, args=(t["id"],))
+            else:
+                # 每日循环任务：直接按钮
+                st.sidebar.button(
+                    f"⬜ {t['keyword']}{duration_text}（每日）",
+                    key=f"start_idle_{t['id']}",
+                    on_click=_on_start_idle, args=(t["id"],),
+                )
 
     # 预定任务
     scheduled = get_scheduled_tasks()
@@ -319,9 +330,10 @@ def on_accept():
     task_kw = resp.get("task_keyword", "这件事")
     suggested_minutes = resp.get("suggested_minutes")
     task_type = resp.get("task_type", "work")
+    detail = resp.get("reply", "")
     create_task(keyword=task_kw, combo="",
                 energy_level=energy_now, suggested_minutes=suggested_minutes,
-                task_type=task_type, auto_start=False)
+                task_type=task_type, auto_start=False, detail=detail)
 
     add_message("assistant", f"已记录「{task_kw}」，想做的时候在侧边栏点开始就行～")
     st.session_state.last_ai_response = None

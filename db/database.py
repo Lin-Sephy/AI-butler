@@ -129,6 +129,12 @@ def init_db():
     except sqlite3.OperationalError:
         c.execute("ALTER TABLE task ADD COLUMN scheduled_at TIMESTAMP")
 
+    # 兼容旧表：如果 detail 列不存在则添加
+    try:
+        c.execute("SELECT detail FROM task LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE task ADD COLUMN detail TEXT DEFAULT ''")
+
     conn.commit()
     conn.close()
 
