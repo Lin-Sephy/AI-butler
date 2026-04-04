@@ -90,7 +90,7 @@ CHAT_PROMPT_TEMPLATE = '''你是"小白"，
 - emotion: 用户当前情绪（开心/烦躁/焦虑/平静/疲惫/兴奋等），看不出来填 null
 - mentioned_activity: 用户提到的具体事项（如"写论文""去奶奶家""跑步"），没提到填 null
 - activity_category: 这件事的性质分类——"work"（工作学习）/ "rest"（恢复休息）/ "life"（生活行程，如照顾家人、吃饭、洗澡、赴约）/ null
-- user_attitude: 用户对这件事的态度——"wants_help"（想让你帮忙安排/不知道怎么做）/ "just_sharing"（只是在说/告知行程）/ "frustrated"（提到但带负面情绪）/ null
+- user_attitude: 用户对这件事的态度——"wants_help"（想让你帮忙安排/不知道怎么做）/ "wants_to_start"（用户主动表达要开始做某事，已经知道做什么）/ "just_sharing"（只是在说/告知/汇报已完成）/ "frustrated"（提到但带负面情绪）/ null
 - scheduled_time: 用户提到的未来时间点（如"明天9点""下午3点"），没提到填 null。格式为自然语言，系统会转换'''
 
 

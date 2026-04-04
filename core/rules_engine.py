@@ -19,7 +19,7 @@ def should_trigger_task(signal: dict, energy_level: int, task_board: list[dict])
     signal 字段：
         - mentioned_activity: 用户提到的事项
         - activity_category: work / rest / life / None
-        - user_attitude: wants_help / just_sharing / frustrated / None
+        - user_attitude: wants_help / wants_to_start / just_sharing / frustrated / None
     """
     category = signal.get("activity_category")
     attitude = signal.get("user_attitude")
@@ -34,6 +34,10 @@ def should_trigger_task(signal: dict, energy_level: int, task_board: list[dict])
 
     # 用户明确想让你帮忙安排 → 触发
     if attitude == "wants_help" and category == "work":
+        return True
+
+    # 用户主动表达要开始做某事 → 触发（直接记录，不给建议）
+    if attitude == "wants_to_start" and category == "work":
         return True
 
     # 用户只是在说/告知 → 不触发
