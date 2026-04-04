@@ -97,7 +97,7 @@ def _parse_chat_response(raw: str) -> dict:
         signal["activity_category"] = None
 
     # 验证 user_attitude
-    if signal["user_attitude"] not in ("wants_help", "just_sharing", "frustrated", None):
+    if signal["user_attitude"] not in ("wants_help", "wants_to_start", "just_sharing", "frustrated", None):
         signal["user_attitude"] = None
 
     return {"reply": reply, "signal": signal}
