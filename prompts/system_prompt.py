@@ -144,7 +144,7 @@ TASK_PROMPT_TEMPLATE = '''你是"小白"，用户的朋友。
 
 字段说明：
 - task_keyword: 用户已经说清楚的直接用原话，不明确时填你建议的具体行动。必填
-- suggested_minutes: 建议专注时长（分钟），必填
+- suggested_minutes: 建议专注时长（分钟）。用户自己说了时长就用用户的，用户没说且是主动要开始的填 null，需要你建议时才填具体数字
 - task_type: "work"（工作/学习类）或 "rest"（休息/恢复类），必填
 - scheduled_at: 预定时间，格式 "YYYY-MM-DD HH:MM"。仅当用户提到了未来时间安排时填入，否则 null
 - scheduled_keyword: 预定任务的内容（如"开会""交报告"），与 scheduled_at 配对。填用户要做的事本身，不是你推荐的准备动作。无预定时 null
