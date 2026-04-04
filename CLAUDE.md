@@ -57,6 +57,7 @@ ai-butler/
 
 **触发规则（保守策略，不确定时不触发）：**
 - work + wants_help → 触发（rest 不触发，v4.1 改动）
+- work + wants_to_start → 触发（用户主动要开始，v4.2 新增）
 - work + frustrated → 不触发（先接住情绪）
 - life + 任何 → 不触发（生活行程不管理）
 - 没提到具体事项 → 不触发
@@ -81,7 +82,7 @@ ai-butler/
 {"energy_impression": 4, "emotion": "平静", "mentioned_activity": "写论文", "activity_category": "work", "user_attitude": "wants_help", "scheduled_time": null}
 ```
 
-信号字段：energy_impression（精力感知1-5）、emotion（情绪）、mentioned_activity（提到的事项）、activity_category（work/rest/life/null）、user_attitude（wants_help/just_sharing/frustrated/null）、scheduled_time（提到的未来时间）
+信号字段：energy_impression（精力感知1-5）、emotion（情绪）、mentioned_activity（提到的事项）、activity_category（work/rest/life/null）、user_attitude（wants_help/wants_to_start/just_sharing/frustrated/null）、scheduled_time（提到的未来时间）
 
 **call_task 输出：** JSON（仅 Python 触发时调用）
 
@@ -138,6 +139,7 @@ ai-butler/
 | MVP 后追加 | v3 架构：聊天优先+按需干活（双模式输出）、记忆系统拆分长期/每日 | ✅ 完成（2026-04-01） |
 | MVP 后追加 | v4 架构：聊天归 AI + 推任务归 Python，双 prompt 分离，任务栏信息传入 | ✅ 完成（2026-04-02） |
 | MVP 后追加 | v4.1：按钮改名记录/再聊聊 + 记忆系统重写两级印象 + Session Memory | ✅ 完成（2026-04-03） |
+| MVP 后追加 | v4.2：分层 prompt 架构 + 双身份 + wants_to_start 信号 + 人格立体化 | ✅ 完成（2026-04-04） |
 
 ## MVP 已上线，后续迭代方向
 
@@ -172,6 +174,22 @@ ai-butler/
 - 休息任务完成后弹精力确认，工作任务不弹
 - API 超时兜底区分冷启动和对话中途
 - prompt 调优：combo C 有上下文时直接推荐、combo F 收窄触发条件、willingness 判断区分「不知道怎么做X」和「不知道干嘛」
+
+**v4.2 分层架构包含的改动（2026-04-04）：**
+- 聊天 prompt 从扁平结构重构为分层：本我层（身份认同）→ 情感模式（情绪流动）→ 行为模式（边界习惯）→ 回复规则层
+- 核心发现：身份定义决定行为，改规则不如改身份（详见 docs/portfolio/2026-04-04_prompt分层架构发现.md）
+- 双身份定义：私下朋友，工作秘书。任务 prompt 身份从"朋友"改为"私人秘书"
+- 新增 wants_to_start 信号：区分"要开始做"和"告知/汇报已完成"，work + wants_to_start 也触发推任务
+- intent.py 信号验证白名单加入 wants_to_start
+- 任务 prompt：用户已明确要做什么时直接用原话记录，不替用户细化方案
+- suggested_minutes 改为可选：用户主动开始时填 null，不替用户定时间
+- 降低 DS 有用性焦虑：共享人格删"可靠"、删"推动话题"、加"不怕说错话"
+- INTJ 人设立体化：加次要面向（能看出朋友硬撑，关心不挂嘴上）
+- 人格从 5 个缩减为 2 个主力（INTJ + INTP），其余代码已删除，有价值的部分提取进本我层
+- 回复原则重写：建议需双重前提（了解清楚+用户需要），用户想直接开始就直接记录
+- INTP 人设立体化：观察建模、帮朋友看清自己、有脾气有底线、不需要搞清所有信息才能回应
+- INTJ 和 INTP 均加入真人话术风格参考：基于实测对话提炼，DS 理解风格而非复制原文
+- 话术参考中刻意避免问句，减轻 DS 选择题倾向
 
 **v4.1 改版包含的改动（2026-04-03）：**
 - 按钮从"开始"/"换一个"改为"记录"/"再聊聊"
