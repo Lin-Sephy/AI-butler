@@ -90,15 +90,12 @@ if "session_summary" not in st.session_state:
 
 # ---------- 小白人设（侧边栏） ----------
 PERSONA_OPTIONS = {
-    "infp": "共情型（INFP）",
     "intj": "军师型（INTJ）",
-    "rest": "休息型（REST）",
     "intp": "观察型（INTP）",
-    "challenger": "挑战型（找茬）",
 }
 
 if "persona" not in st.session_state:
-    st.session_state.persona = "infp"
+    st.session_state.persona = "intj"
 
 st.sidebar.markdown("### 小白性格")
 persona_labels = list(PERSONA_OPTIONS.values())

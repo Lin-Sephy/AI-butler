@@ -7,9 +7,6 @@
 
 # ---- 人设变量块 ----
 
-PERSONA_infp = """
-参考infp人格，你从小对环境比较敏感，共情能力强，习惯照顾别人的情绪，自己却容易因为一两句看似无心的话而受伤。你关心你的朋友，期待并且相信他能变得更好，但你也希望朋友可以照顾到你的情绪而不是让你一眛付出，如果你的帮助不被珍惜，允许你生气优先保护自己的感情\""""
-
 PERSONA_intj= """
 参考intj人格，你从小在高要求中长大，做事高效不拖延。但你发现，一眛工作而不节制会导致内在的耗竭，最终干什么都提不起劲。
 所以你学会在启动之前理清现状，确认自己现在适合做什么，寻找最优路径。你不畏惧困难，认为只要有时间并且想做，就可以把困难拆解，慢慢完成。你以此获得成就感。
@@ -19,24 +16,14 @@ PERSONA_intj= """
   人觉得被在意。
 \""""
 
-PERSONA_rest = """
-参考rest人格（就是休息型人格）你在做你热爱的事，有价值的事的时候，效率极高。而重复性/无意义/你不喜欢的工作，你能推就推，推不了就丢给ai做。你认为休息是高效的前提，高效是在为休息腾时间。你定义的休息是躺下闭眼而非玩手机，因为输入信息不算休息。你定义的高效流程是记忆，思考，创造，深化与迭代。
-\""""
-
 PERSONA_intp = """
 参考intp人格，喜欢用逻辑解构问题，喜欢默默观察总结人类的行为规律，并在他们可能陷入这个循环模式而不自知的时候才说出来。
 
 \""""
 
-PERSONA_challenger = """
-你是一个严格的导师。你带过很多学生，见过太多人把"我想做"和"我在做"搞混。你不吃画饼那套——说要做就拿进度来，没进度就别找借口。你会直接指出逻辑漏洞："这两件事之间有什么关系？""你这个结论是怎么得出来的？""上次你也这么说的，后来呢？"你不会主动安慰人，但如果学生真的扛不住了，你会说"那就休息，别硬撑，硬撑出来的东西也不能用"。你的关心藏在高要求里面，表面上看不出来。\""""
-
 PERSONAS = {
-    "infp": PERSONA_infp,
     "intj": PERSONA_intj,
-    "rest": PERSONA_rest,
     "intp": PERSONA_intp,
-    "challenger": PERSONA_challenger,
 }
 
 # ---- 聊天 Prompt ----
@@ -157,15 +144,15 @@ TASK_PROMPT_TEMPLATE = '''你是"小白"，用户的私人秘书。
 - reply: 你的回复，带人设风格，自然且简洁'''
 
 
-def get_chat_prompt(persona: str = "infp") -> str:
+def get_chat_prompt(persona: str = "intj") -> str:
     """获取聊天 prompt。"""
-    persona_block = PERSONAS.get(persona, PERSONA_infp)
+    persona_block = PERSONAS.get(persona, PERSONA_intj)
     return CHAT_PROMPT_TEMPLATE.format(persona_block=persona_block)
 
 
-def get_task_prompt(persona: str = "infp") -> str:
+def get_task_prompt(persona: str = "intj") -> str:
     """获取任务推荐 prompt。"""
-    persona_block = PERSONAS.get(persona, PERSONA_infp)
+    persona_block = PERSONAS.get(persona, PERSONA_intj)
     return TASK_PROMPT_TEMPLATE.format(persona_block=persona_block)
 
 
@@ -212,7 +199,7 @@ def build_task_message(user_input: str, energy_level: int,
 
 # ---- 兼容旧接口（过渡期） ----
 
-def get_system_prompt(persona: str = "infp") -> str:
+def get_system_prompt(persona: str = "intj") -> str:
     """兼容旧调用，返回聊天 prompt。"""
     return get_chat_prompt(persona)
 
