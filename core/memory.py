@@ -332,9 +332,18 @@ def get_filtered_daily_memo() -> str:
         except (ValueError, KeyError):
             return False
 
-    # 情绪：2 天过期
+    def _is_today(item, now):
+        if not item or not item.get("updated_at"):
+            return False
+        try:
+            updated = datetime.strptime(item["updated_at"], "%Y-%m-%d %H:%M")
+            return updated.strftime("%Y-%m-%d") == now.strftime("%Y-%m-%d")
+        except (ValueError, KeyError):
+            return False
+
+    # 情绪：只保留当天
     emotion = current.get("emotion")
-    if emotion and emotion.get("value") and _is_recent(emotion, 2):
+    if emotion and emotion.get("value") and _is_today(emotion, now):
         source = f"（{emotion['source']}）" if emotion.get("source") else ""
         parts.append(f"当前情绪：{emotion['value']}{source}")
 

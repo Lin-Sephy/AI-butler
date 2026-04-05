@@ -110,7 +110,8 @@ def call_chat(user_input: str, energy_level: int,
               ai_memo: str = "",
               daily_memo: str = "",
               task_board: str = "",
-              session_summary: str = "") -> dict:
+              session_summary: str = "",
+              is_cross_day: bool = False) -> dict:
     """聊天调用：自然聊天 + 输出观察信号。
 
     有 session_summary 时用"摘要 + 最近 5 条"，否则用"最近 20 条"。
@@ -130,6 +131,7 @@ def call_chat(user_input: str, energy_level: int,
             user_memo=user_memo, ai_memo=ai_memo,
             daily_memo=daily_memo, task_board=task_board,
             session_summary=session_summary,
+            is_cross_day=is_cross_day,
         )
 
         messages = [{"role": "system", "content": system_prompt}]

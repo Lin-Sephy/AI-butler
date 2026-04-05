@@ -4,7 +4,7 @@ import logging
 from db.database import (
     init_db, save_action_log, get_user_memo, save_user_memo,
     clear_ai_memo,
-    save_chat_message, load_session_messages,
+    save_chat_message, load_session_messages, now_cn,
 )
 from core.memory import update_ai_memory, get_filtered_daily_memo, bump_on_mention, get_confirmed_impressions_text, get_impressions_display
 from core.energy import get_current_energy, update_energy, ENERGY_LEVELS
@@ -87,6 +87,21 @@ if "msg_count" not in st.session_state:
     st.session_state.msg_count = 0  # 用户消息计数，每 5 轮触发记忆更新
 if "session_summary" not in st.session_state:
     st.session_state.session_summary = ""  # 会话摘要，压缩长对话上下文
+if "last_active_date" not in st.session_state:
+    st.session_state.last_active_date = now_cn().strftime("%Y-%m-%d")
+if "is_cross_day" not in st.session_state:
+    st.session_state.is_cross_day = False
+
+# ---------- 跨天检测：清空对话原文，保留摘要并标记为昨天 ----------
+today_str = now_cn().strftime("%Y-%m-%d")
+if st.session_state.last_active_date != today_str:
+    st.session_state.last_active_date = today_str
+    st.session_state.msg_count = 0
+    st.session_state.is_cross_day = bool(st.session_state.session_summary)
+    # 清空对话原文，重新开始
+    greeting = "来啦～"
+    st.session_state.messages = [{"role": "assistant", "content": greeting}]
+    save_chat_message(st.session_state.session_id, "assistant", greeting)
 
 # ---------- 小白人设（侧边栏） ----------
 PERSONA_OPTIONS = {
@@ -582,6 +597,7 @@ if user_input:
                     daily_memo=daily_memo_text,
                     task_board=task_board_text,
                     session_summary=st.session_state.session_summary,
+                    is_cross_day=st.session_state.is_cross_day,
                 )
     except Exception as e:
         logging.error(f"聊天调用出错: {type(e).__name__}: {e}")
@@ -675,6 +691,11 @@ if user_input:
         bump_on_mention(user_input)
     except Exception as e:
         logging.error(f"记忆关键词匹配失败: {type(e).__name__}: {e}")
+
+    # 跨天摘要用完后清除：第一轮对话已经让 DS 知道昨天的背景了
+    if st.session_state.is_cross_day:
+        st.session_state.is_cross_day = False
+        st.session_state.session_summary = ""
 
     # 每 5 轮用户消息触发一次 AI 记忆更新 + 会话摘要
     st.session_state.msg_count += 1
