@@ -105,6 +105,7 @@ if st.session_state.last_active_date != today_str:
 
 # ---------- 小白人设（侧边栏） ----------
 PERSONA_OPTIONS = {
+    "infp": "共情型（INFP）",
     "intj": "军师型（INTJ）",
     "intp": "观察型（INTP）",
 }
