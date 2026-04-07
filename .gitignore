@@ -5,3 +5,11 @@ __pycache__/
 .DS_Store
 *.db
 .claude/
+
+# 私人对话记录
+docs/conversations/
+that-afternoon.html
+
+# 无关文件
+.playwright-mcp/
+telegrambot_template_v2.0*/

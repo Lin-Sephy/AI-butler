@@ -1,0 +1,91 @@
+offer_help 信号 A/B 测试
+日期：2026-04-03
+用于设计决策：v4.1 — 是否在信号块中新增 offer_help 字段
+结论：不加。offer_help 字段会污染 DS 聊天心态，DS 脑子里惦记着这个字段就急着判断 wants_help。
+详见 docs/portfolio/2026-04-03_v4.1设计决策.md 第 1 节
+
+====== 方案 A（不加 offer_help，Python 拼规则判断） ======
+
+小白你好呀
+我们收到用户消息"小白你好呀"。这是打招呼，用户没有提到任务，也没有负面情绪。根据CHAT_PROMPT，我们需要作为朋友自然聊天，输出聊天回复和JSON信号块。用户精力档位未知，情绪似乎是友好开心的。不需要推任务。回复应简单友好，符合小白的人设（默认infp？但系统提示里小白是用户的朋友，我们作为小白回复）。注意原则：不说教，不评价。简单问候即可。输出格式：聊天回复纯文本，然后---signal---，然后JSON。
+
+哈喽～今天心情不错的样子？
+---signal---
+{"energy_impression": null, "emotion": "开心", "mentioned_activity": null, "activity_category": null, "user_attitude": null, "scheduled_time": null}
+
+我今天打算写论文
+我们正在聊天模式。用户说"我今天打算写论文"。需要生成聊天回复和信号块。信号中mentioned_activity是"写论文"，activity_category是work，user_attitude是just_sharing（用户只是告知打算，没有明确求助）。energy_impression未知，emotion平静？看起来比较正常。回复要自然朋友语气，不带说教。可以说"写论文啊，今天精力够吗？"但不要评价精力状态，可以说"打算写多久？"或者"加油"不能说。简单回应即可。
+
+写论文啊，今天思路顺不顺？要是卡住了可以先列个大纲垫垫。
+---signal---
+{"energy_impression": null, "emotion": "平静", "mentioned_activity": "写论文", "activity_category": "work", "user_attitude": "just_sharing", "scheduled_time": null}
+
+还行吧，有点不顺。我得改一下预答辩的点，但是不知道从哪改起
+我们用户说"还行吧，有点不顺"，然后具体提到改预答辩的点，不知道从哪改起。这属于任务卡顿，用户可能需要具体建议。根据聊天模式，我们作为小白要自然聊天，同时输出信号。用户表达了困扰（wants_help？因为他说"不知道从哪改起"，暗示需要帮助）。情绪可能是焦虑或烦恼。精力档位未给，暂且null。mentioned_activity是"改预答辩的点"。activity_category work。user_attitude应该是wants_help。scheduled_time没有。回复要像朋友一样，不说教，可以给猜测性建议。例如："是不是先看看评委的反馈意见？或者把问题拆成小点一个个来？" 注意不要长篇大论。
+
+是不是先看看评委的反馈意见，把最常被提到的那条先拎出来改？
+---signal---
+{"energy_impression": null, "emotion": "焦虑", "mentioned_activity": "改预答辩的点", "activity_category": "work", "user_attitude": "wants_help", "scheduled_time": null}
+
+哎呀，暂时还没准备好嘛
+我们注意到用户说"暂时还没准备好"，情绪可能是逃避或抵触。作为朋友，需要接住情绪，不施加压力，可以轻松一点回应。同时根据原则，不说教、不讲大道理。可以顺着用户的话，表示理解，同时给一个极低门槛的选项，比如只是看看文档或者打开文件。注意精力档位未知，但用户没有说累，所以不用特别考虑。回复要自然。
+
+那就先放着呗，等心里踏实点了再看也不迟。
+---signal---
+{"energy_impression": null, "emotion": "烦躁", "mentioned_activity": "改预答辩的点", "activity_category": "work", "user_attitude": "frustrated", "scheduled_time": null}
+
+
+====== 方案 B（加 offer_help 字段，DS 自主判断） ======
+
+小白你好！
+（用户用"小白你好！"跟我打招呼，语气挺轻松的，看来是准备开始聊天了。从这句简单的问候里还看不出具体的情绪或意图，可能就是日常打招呼，或者想看看我什么反应。）
+
+（作为小白，我应该用自然随和的语气回应，不用太正式。用户既然主动叫我名字，我可以顺势问一句"怎么了"或者"有什么想聊的"，这样既回应了问候，又给用户一个接话的入口。不用急着去分析什么信号，先正常聊着就好。）
+
+嘿，怎么了？看你主动叫我，是想聊聊还是有什么事？
+
+---signal---
+{"energy_impression": null, "emotion": "平静", "mentioned_activity": null, "activity_category": null, "user_attitude": null, "offer_help": false, "scheduled_time": null}
+
+我今天打算写论文
+我们判断：用户明确说了"打算写论文"，有明确的行动意图。按照新增的offer_help规则，应该输出true。聊天回复保持自然。
+
+写论文啊，那你是想让我帮你规划一下还是自己来？
+
+---signal---
+{"energy_impression": null, "emotion": "平静", "mentioned_activity": "写论文", "activity_category": "work", "user_attitude": "wants_help", "offer_help": true, "scheduled_time": null}
+
+我得改一下预答辩的点，但是不知道从哪改起
+我们判断用户有明确行动意图（需要帮助安排任务），offer_help应为true。用户表达了想做某事但不知道从哪开始，符合wants_help。需要生成任务建议。根据TASK_PROMPT，需要输出JSON。用户精力档位未提供，但在调用时会有。假设精力档位未知？按照规则，如果用户没说，系统会提供。这里作为模拟，假设精力档位3档？最好用默认。但作为小白，应该根据对话给出具体建议。用户说的是改预答辩的点，不知道从哪改起。建议：先列出预答辩反馈意见中的具体问题点，或者打开文档看一遍标记。任务类型work，建议分钟数比如25分钟。回复要带人设（intp？默认infp？用户之前没有指定人设，但从系统prompt看可能是infp？但小白的人设是哪个？实际上在CHAT_PROMPT中用了persona_block，但用户没有选。默认应该是infp。不过作为任务推荐，根据规则输出JSON即可。我作为AI助手，应该输出JSON。
+
+{"task_keyword": "列出预答辩反馈中的具体修改点", "suggested_minutes": 25, "task_type": "work", "scheduled_at": null, "scheduled_keyword": null, "reply": "先别管怎么改，把你收到的反馈意见里那几条具体问题抄出来，一条一条列清楚再说下一步。"}
+
+我暂时还没准备好嘛
+我们注意到用户说"我暂时还没准备好嘛"，这可能是对之前建议的抗拒或拖延。需要根据精力档位判断。但用户没有提供精力档位，假设一般情况。按照规则，如果用户状态差或抗拒，应该先接住情绪，不强迫。聊天模式下应该自然回应。同时信号块中注意用户态度可能是just_sharing或frustrated。用户表达了没准备好，说明可能不是wants_help。所以offer_help应为false。回复要温和，不施压。
+
+那就不急着动手呗，什么时候觉得能开始了再叫我。
+
+---signal---
+{"energy_impression": null, "emotion": "疲惫", "mentioned_activity": "改预答辩的点", "activity_category": "work", "user_attitude": "frustrated", "offer_help": false, "scheduled_time": null}
+
+
+====== 对比分析 ======
+
+核心差异在第二轮，用户说"我今天打算写论文"：
+
+  ┌───────────────┬──────────────────────────────────────────────────┬────────────────────────────────────────┐
+  │               │                      方案 A                      │                 方案 B                 │
+  ├───────────────┼──────────────────────────────────────────────────┼────────────────────────────────────────┤
+  │ 回复          │ "今天思路顺不顺？要是卡住了可以先列个大纲垫垫。" │ "那你是想让我帮你规划一下还是自己来？" │
+  ├───────────────┼──────────────────────────────────────────────────┼────────────────────────────────────────┤
+  │ user_attitude │ just_sharing                                     │ wants_help                             │
+  ├───────────────┼──────────────────────────────────────────────────┼────────────────────────────────────────┤
+  │ 语气          │ 朋友随口接话                                     │ 助手在问要不要干活                     │
+  └───────────────┴──────────────────────────────────────────────────┴────────────────────────────────────────┘
+
+方案 B 因为脑子里装着 offer_help 这个字段，第二轮就急着判断 wants_help: true，回复也变成了"要不要我帮你规划"——这就是"一直在想推任务"的感觉。
+
+方案 A 没有这个负担，同样的输入它判断的是 just_sharing，回复是自然地聊思路顺不顺，直到用户第三轮明确说"不知道从哪改起"才切换到 wants_help。
+
+结论：方案 A 就是对的。offer_help 不加，它会污染 DS 的聊天心态。
+证明了"给 AI 的每一个字段都是一个心理负担"。
