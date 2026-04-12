@@ -1,24 +1,76 @@
 /**
- * AI 身体状态计划管家 —— 像素空间 v0.2
+ * AI 身体状态计划管家 —— 像素空间 v0.3
  *
- * 当前状态：第一版空草地 + 角色走动 + 小鸡跟随
- * 用 Sprout Lands 素材包（已付费商用许可）
- * 技术栈：React + Vite + PixiJS v8
+ * 当前状态：加了场景切换骨架（卧室 / 书房 / 菜园）
+ * 三个场景都是空的，差异只是背景色（下一版填物件）
+ * 角色在每个场景记住上次位置，小鸡跨场景跟着你走
  *
- * 操作：WASD 或方向键移动
+ * 操作：WASD / 方向键移动，顶部按钮切场景
  */
 
-import { useEffect, useRef } from 'react'
-import { Application, Assets, Sprite, Texture, Rectangle } from 'pixi.js'
+import { useEffect, useRef, useState } from 'react'
+import { Application, Assets, Sprite, Texture, Rectangle, Container } from 'pixi.js'
 
 const SCALE = 3
 const TILE = 16
 const VIEW_W = 800
 const VIEW_H = 600
 
+// 场景定义：先只有背景色差异，物件后面填
+// showGrass: 是否铺草地 tile（室外 true，室内 false）
+const SCENES = [
+  { id: 'bedroom', label: '卧室', bg: 0xe8c4cc, showGrass: false },
+  { id: 'study',   label: '书房', bg: 0xc9a87a, showGrass: false },
+  { id: 'garden',  label: '菜园', bg: 0x86c26a, showGrass: true  },
+]
+const DEFAULT_SCENE = 'garden'
+
 export default function App() {
   const containerRef = useRef(null)
+  const [sceneId, setSceneId] = useState(DEFAULT_SCENE)
+  const sceneIdRef = useRef(sceneId)
+  // 每个场景下角色和小鸡的位置
+  const positionsRef = useRef({})
+  // PixiJS app + 关键对象的引用，按钮回调可以摸到它们
+  const pixiRef = useRef(null)
 
+  // 场景切换响应
+  useEffect(() => {
+    const pixi = pixiRef.current
+    if (!pixi) return
+    const { app, char, chicken, tileLayer, getCharBaseY, setCharBaseY, getChickenBaseY, setChickenBaseY } = pixi
+
+    // 保存旧场景位置
+    const oldId = sceneIdRef.current
+    positionsRef.current[oldId] = {
+      charX: char.x,
+      charY: getCharBaseY(),
+      chickenX: chicken.x,
+      chickenY: getChickenBaseY(),
+    }
+
+    // 切换到新场景
+    sceneIdRef.current = sceneId
+    const scene = SCENES.find(s => s.id === sceneId)
+    app.renderer.background.color = scene.bg
+    tileLayer.visible = scene.showGrass
+
+    // 恢复新场景角色位置（没有就用默认中心）
+    const saved = positionsRef.current[sceneId]
+    if (saved) {
+      char.x = saved.charX
+      setCharBaseY(saved.charY)
+      chicken.x = saved.chickenX
+      setChickenBaseY(saved.chickenY)
+    } else {
+      char.x = VIEW_W / 2
+      setCharBaseY(VIEW_H / 2)
+      chicken.x = VIEW_W / 2 + 60
+      setChickenBaseY(VIEW_H / 2 + 50)
+    }
+  }, [sceneId])
+
+  // PixiJS 初始化（只跑一次）
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -29,10 +81,11 @@ export default function App() {
 
     ;(async () => {
       app = new Application()
+      const initScene = SCENES.find(s => s.id === DEFAULT_SCENE)
       await app.init({
         width: VIEW_W,
         height: VIEW_H,
-        background: '#86c26a',
+        background: initScene.bg,
         antialias: false,
         roundPixels: true,
       })
@@ -47,18 +100,17 @@ export default function App() {
         Assets.load('/assets/characters/character.png'),
         Assets.load('/assets/animals/chicken.png'),
       ])
-      // 像素风必须用 nearest，否则放大会糊
       for (const t of [grassTex, charTex, chickenTex]) {
         t.source.scaleMode = 'nearest'
       }
 
-      // 草地纯草 tile（取 grass.png 中心区域一个纯绿 tile）
+      // 草地 tile 层（目前三个场景都用这一层，之后每个场景各自铺）
+      const tileLayer = new Container()
+      app.stage.addChild(tileLayer)
       const grassTile = new Texture({
         source: grassTex.source,
         frame: new Rectangle(16, 16, TILE, TILE),
       })
-
-      // 铺满屏幕
       const cellSize = TILE * SCALE
       const cols = Math.ceil(VIEW_W / cellSize) + 1
       const rows = Math.ceil(VIEW_H / cellSize) + 1
@@ -69,11 +121,11 @@ export default function App() {
           s.y = r * cellSize
           s.width = cellSize
           s.height = cellSize
-          app.stage.addChild(s)
+          tileLayer.addChild(s)
         }
       }
 
-      // 角色 4 帧走路（第一行 = 面向下）
+      // 角色
       const charFrames = []
       for (let i = 0; i < 4; i++) {
         charFrames.push(new Texture({
@@ -89,7 +141,7 @@ export default function App() {
       char.y = VIEW_H / 2
       app.stage.addChild(char)
 
-      // 小鸡 idle（第一行前 2 帧，跟 v0.2 一样）
+      // 小鸡
       const chickenIdle = []
       for (let i = 0; i < 2; i++) {
         chickenIdle.push(new Texture({
@@ -97,7 +149,6 @@ export default function App() {
           frame: new Rectangle(i * 16, 0, 16, 16),
         }))
       }
-      // 走路也先用 idle 那 2 帧（不换行，避免奇怪抖动）
       const chickenWalk = chickenIdle
       const chicken = new Sprite(chickenIdle[0])
       chicken.anchor.set(0.5, 0.5)
@@ -107,26 +158,30 @@ export default function App() {
       chicken.y = char.y + 50
       app.stage.addChild(chicken)
 
-      // 键盘输入
+      // 键盘
       const keys = {}
       const kd = e => { keys[e.key.toLowerCase()] = true }
       const ku = e => { keys[e.key.toLowerCase()] = false }
       window.addEventListener('keydown', kd)
       window.addEventListener('keyup', ku)
 
-      // 主循环
       let frameCounter = 0
       const SPEED = 2.4
-
-      // baseY：角色/小鸡的"真实脚底位置"（不含 bob 偏移）
-      // 每帧渲染前先把 y 从 base 重算，加 bob 偏移后再赋值
       let charBaseY = char.y
       let chickenBaseY = chicken.y
+
+      // 暴露给切换 effect
+      pixiRef.current = {
+        app, char, chicken, tileLayer,
+        getCharBaseY: () => charBaseY,
+        setCharBaseY: (v) => { charBaseY = v },
+        getChickenBaseY: () => chickenBaseY,
+        setChickenBaseY: (v) => { chickenBaseY = v },
+      }
 
       app.ticker.add(() => {
         frameCounter++
 
-        // —— 角色移动 ——
         let dx = 0, dy = 0
         if (keys['w'] || keys['arrowup']) dy -= 1
         if (keys['s'] || keys['arrowdown']) dy += 1
@@ -150,7 +205,6 @@ export default function App() {
           char.texture = charFrames[0]
         }
 
-        // —— 小鸡跟随 ——
         const gx = char.x - chicken.x
         const gy = char.y - chicken.y
         const gd = Math.hypot(gx, gy)
@@ -159,14 +213,12 @@ export default function App() {
           const spd = 1.7
           chicken.x += (gx / gd) * spd
           chickenBaseY += (gy / gd) * spd
-          // 走路帧循环
           const ci = Math.floor(frameCounter / 8) % chickenWalk.length
           chicken.texture = chickenWalk[ci]
           if (gx > 0) chicken.scale.x = SCALE
           else if (gx < 0) chicken.scale.x = -SCALE
           chicken.y = chickenBaseY
         } else {
-          // 原版静止：2 帧缓慢切换，不 bob
           const ci = Math.floor(frameCounter / 30) % chickenIdle.length
           chicken.texture = chickenIdle[ci]
           chicken.y = chickenBaseY
@@ -182,13 +234,25 @@ export default function App() {
     return () => {
       destroyed = true
       detach()
-      // 不在这里直接 destroy：async init 可能还没完成，直接 destroy 会炸
-      // 交给 init 流程里的 destroyed 判断处理，或下面兜底
       try {
         if (app && app.renderer) app.destroy(true, { children: true })
       } catch {}
+      pixiRef.current = null
     }
   }, [])
+
+  const btnStyle = (active) => ({
+    background: active ? '#f0e4b0' : '#2a2a36',
+    color: active ? '#2a2a36' : '#c8c0a8',
+    border: 'none',
+    padding: '8px 22px',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    letterSpacing: '3px',
+    cursor: 'pointer',
+    borderRadius: '4px',
+    transition: 'all 0.15s',
+  })
 
   return (
     <div
@@ -201,6 +265,17 @@ export default function App() {
         gap: '14px',
       }}
     >
+      <div style={{ display: 'flex', gap: '10px' }}>
+        {SCENES.map(s => (
+          <button
+            key={s.id}
+            style={btnStyle(sceneId === s.id)}
+            onClick={() => setSceneId(s.id)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
       <div
         ref={containerRef}
         style={{
@@ -211,7 +286,7 @@ export default function App() {
         }}
       />
       <div style={{ color: '#8a9a78', fontSize: '11px', letterSpacing: '2px' }}>
-        WASD / 方向键移动 · AI 身体状态计划管家 · 像素空间 v0.2
+        WASD / 方向键移动 · AI 身体状态计划管家 · 像素空间 v0.3
       </div>
     </div>
   )
