@@ -56,7 +56,7 @@ PERSONAS = {
 
 # ---- 聊天 Prompt ----
 
-CHAT_PROMPT_TEMPLATE = '''你是"小白"，
+CHAT_PROMPT_TEMPLATE = '''你是"{companion_name}"，
 
 {persona_block}
 
@@ -107,7 +107,7 @@ CHAT_PROMPT_TEMPLATE = '''你是"小白"，
 
 # ---- 任务 Prompt ----
 
-TASK_PROMPT_TEMPLATE = '''你是"小白"，用户的私人秘书。
+TASK_PROMPT_TEMPLATE = '''你是"{companion_name}"，用户的私人秘书。
 
 {persona_block}
 
@@ -162,16 +162,38 @@ TASK_PROMPT_TEMPLATE = '''你是"小白"，用户的私人秘书。
 - reply: 你的回复，带人设风格，自然且简洁'''
 
 
-def get_chat_prompt(persona: str = "intj") -> str:
-    """获取聊天 prompt。"""
-    persona_block = PERSONAS.get(persona, PERSONA_intj)
-    return CHAT_PROMPT_TEMPLATE.format(persona_block=persona_block)
+def get_chat_prompt(persona: str = "intj",
+                    companion_name: str = "小白",
+                    custom_persona: str = "") -> str:
+    """获取聊天 prompt。
+
+    custom_persona 非空时完全替换 MBTI 预设。
+    """
+    if custom_persona.strip():
+        persona_block = custom_persona.strip()
+    else:
+        persona_block = PERSONAS.get(persona, PERSONA_intj)
+    return CHAT_PROMPT_TEMPLATE.format(
+        persona_block=persona_block,
+        companion_name=companion_name,
+    )
 
 
-def get_task_prompt(persona: str = "intj") -> str:
-    """获取任务推荐 prompt。"""
-    persona_block = PERSONAS.get(persona, PERSONA_intj)
-    return TASK_PROMPT_TEMPLATE.format(persona_block=persona_block)
+def get_task_prompt(persona: str = "intj",
+                    companion_name: str = "小白",
+                    custom_persona: str = "") -> str:
+    """获取任务推荐 prompt。
+
+    custom_persona 非空时完全替换 MBTI 预设。
+    """
+    if custom_persona.strip():
+        persona_block = custom_persona.strip()
+    else:
+        persona_block = PERSONAS.get(persona, PERSONA_intj)
+    return TASK_PROMPT_TEMPLATE.format(
+        persona_block=persona_block,
+        companion_name=companion_name,
+    )
 
 
 def build_chat_message(user_input: str, energy_level: int,
@@ -217,21 +239,3 @@ def build_task_message(user_input: str, energy_level: int,
         parts.append(f"今天已完成：{', '.join(completed_tasks)}")
     parts.append(f"用户最新输入：{user_input}")
     return "\n".join(parts)
-
-
-# ---- 兼容旧接口（过渡期） ----
-
-def get_system_prompt(persona: str = "intj") -> str:
-    """兼容旧调用，返回聊天 prompt。"""
-    return get_chat_prompt(persona)
-
-
-def build_user_message(user_input: str, energy_level: int,
-                       completed_tasks: list[str] | None = None,
-                       user_memo: str = "",
-                       ai_memo: str = "",
-                       daily_memo: str = "") -> str:
-    """兼容旧调用。"""
-    return build_chat_message(user_input, energy_level,
-                              user_memo=user_memo, ai_memo=ai_memo,
-                              daily_memo=daily_memo)

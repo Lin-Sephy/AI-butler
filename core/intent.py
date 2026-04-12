@@ -111,7 +111,9 @@ def call_chat(user_input: str, energy_level: int,
               daily_memo: str = "",
               task_board: str = "",
               session_summary: str = "",
-              is_cross_day: bool = False) -> dict:
+              is_cross_day: bool = False,
+              companion_name: str = "小白",
+              custom_persona: str = "") -> dict:
     """聊天调用：自然聊天 + 输出观察信号。
 
     有 session_summary 时用"摘要 + 最近 5 条"，否则用"最近 20 条"。
@@ -125,7 +127,7 @@ def call_chat(user_input: str, energy_level: int,
 
     try:
         client = _get_client()
-        system_prompt = get_chat_prompt(persona)
+        system_prompt = get_chat_prompt(persona, companion_name=companion_name, custom_persona=custom_persona)
         user_message = build_chat_message(
             user_input, energy_level,
             user_memo=user_memo, ai_memo=ai_memo,
@@ -227,7 +229,9 @@ def call_task(user_input: str, energy_level: int,
               chat_history: list | None = None,
               persona: str = "infp",
               completed_tasks: list[str] | None = None,
-              context: str = "") -> dict:
+              context: str = "",
+              companion_name: str = "小白",
+              custom_persona: str = "") -> dict:
     """任务推荐调用：给出具体任务建议。
 
     仅在 Python 判断需要推任务时调用。
@@ -245,7 +249,7 @@ def call_task(user_input: str, energy_level: int,
 
     try:
         client = _get_client()
-        system_prompt = get_task_prompt(persona)
+        system_prompt = get_task_prompt(persona, companion_name=companion_name, custom_persona=custom_persona)
         user_message = build_task_message(
             user_input, energy_level,
             context=context,
@@ -295,19 +299,3 @@ def call_task(user_input: str, energy_level: int,
             "scheduled_keyword": None,
             "reply": MID_CHAT_FALLBACK,
         }
-
-
-# ---- 兼容旧接口（过渡期） ----
-
-def call_ai(user_input: str, energy_level: int,
-            chat_history: list | None = None, persona: str = "infp",
-            completed_tasks: list[str] | None = None,
-            user_memo: str = "",
-            ai_memo: str = "",
-            daily_memo: str = "") -> dict:
-    """兼容旧 call_ai 接口，内部转发到 call_chat。"""
-    result = call_chat(user_input, energy_level,
-                       chat_history=chat_history, persona=persona,
-                       user_memo=user_memo, ai_memo=ai_memo,
-                       daily_memo=daily_memo)
-    return {"mode": "chat", "reply": result["reply"]}

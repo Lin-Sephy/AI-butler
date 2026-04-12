@@ -137,9 +137,16 @@ def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
 
     impressions = _get_impressions()
 
+    # 读跟宠名字用于格式化对话历史
+    from db.database import get_companion_name
+    try:
+        companion_name = get_companion_name()
+    except Exception:
+        companion_name = "小白"
+
     recent = chat_history[-20:]
     conv_text = "\n".join(
-        f"{'用户' if m['role'] == 'user' else '小白'}: {m['content']}"
+        f"{'用户' if m['role'] == 'user' else companion_name}: {m['content']}"
         for m in recent if m["role"] in ("user", "assistant")
     )
 
