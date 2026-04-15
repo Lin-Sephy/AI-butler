@@ -1,4 +1,7 @@
-"""精力系统：五档定义、静默继承、精力更新接口。"""
+"""精力系统：五档定义、静默继承、精力更新接口。
+
+v2 多用户改造（2026-04-15）：所有公开函数加 user_id。
+"""
 
 from db.database import get_today_energy, get_avg_energy_7d, save_energy
 
@@ -14,18 +17,18 @@ ENERGY_LEVELS = {
 DEFAULT_ENERGY = 4  # 无任何历史数据时的默认值
 
 
-def get_current_energy() -> dict:
+def get_current_energy(user_id: str) -> dict:
     """获取当前精力状态。优先用今天的记录，否则静默继承。
 
     返回: {"energy_level": int, "source": str, "label": str, "color": str}
     """
-    today = get_today_energy()
+    today = get_today_energy(user_id)
     if today:
         level = today["energy_level"]
         source = today["source"]
     else:
         # 静默继承：取过去 7 天均值四舍五入
-        avg = get_avg_energy_7d()
+        avg = get_avg_energy_7d(user_id)
         if avg is not None:
             level = max(1, min(5, round(avg)))
             source = "inherited"
@@ -42,11 +45,11 @@ def get_current_energy() -> dict:
     }
 
 
-def update_energy(value: int, source: str = "manual") -> dict:
+def update_energy(user_id: str, value: int, source: str = "manual") -> dict:
     """手动设置精力值，写入数据库。
 
     返回: {"energy_level": int, "source": str, "updated_at": str}
     """
     value = max(1, min(5, value))
-    result = save_energy(value, source)
+    result = save_energy(user_id, value, source)
     return result

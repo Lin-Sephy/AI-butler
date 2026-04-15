@@ -5,6 +5,9 @@
 - 深入印象：触发 3 次以上且跨 2 天，才升级并传给 DS
 - 衰减：初步 7 天过期删除，深入 14 天未触发降级（高频 30 天）
 - 矛盾检测：DS 在提取时判断已有印象是否被推翻
+
+v2 多用户改造（2026-04-15）：所有 DB 接触的函数加 user_id。
+纯计算函数（_format_existing_impressions / _apply_decay / _extract_keywords）不变。
 """
 
 import json
@@ -64,9 +67,9 @@ EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印
 
 # ---- 印象存取 ----
 
-def _get_impressions() -> list[dict]:
+def _get_impressions(user_id: str) -> list[dict]:
     """从 ai_memo 读取印象列表。兼容旧格式（纯文本直接丢弃）。"""
-    raw = get_ai_memo()
+    raw = get_ai_memo(user_id)
     if not raw:
         return []
     try:
@@ -78,14 +81,14 @@ def _get_impressions() -> list[dict]:
         return []
 
 
-def _save_impressions(impressions: list[dict]) -> None:
+def _save_impressions(user_id: str, impressions: list[dict]) -> None:
     """保存印象列表到 ai_memo。"""
-    save_ai_memo(json.dumps({"impressions": impressions}, ensure_ascii=False))
+    save_ai_memo(user_id, json.dumps({"impressions": impressions}, ensure_ascii=False))
 
 
-def get_confirmed_impressions_text() -> str:
+def get_confirmed_impressions_text(user_id: str) -> str:
     """获取印象的可读文本，传给聊天 prompt。confirmed 和 draft 都传，标注区分。"""
-    impressions = _get_impressions()
+    impressions = _get_impressions(user_id)
     confirmed = [imp for imp in impressions if imp.get("level") == "confirmed"]
     drafts = [imp for imp in impressions if imp.get("level") == "draft"]
     if not confirmed and not drafts:
@@ -98,9 +101,9 @@ def get_confirmed_impressions_text() -> str:
     return "背景参考（仅供你内心判断用，不要在对话中直接提及）：\n" + "\n".join(lines)
 
 
-def get_impressions_display() -> str:
+def get_impressions_display(user_id: str) -> str:
     """获取印象的展示文本（侧边栏用）。"""
-    impressions = _get_impressions()
+    impressions = _get_impressions(user_id)
     if not impressions:
         return ""
     confirmed = [imp for imp in impressions if imp.get("level") == "confirmed"]
@@ -115,7 +118,7 @@ def get_impressions_display() -> str:
 
 
 def _format_existing_impressions(impressions: list[dict]) -> str:
-    """格式化已有印象列表传给提取 prompt。"""
+    """格式化已有印象列表传给提取 prompt。纯计算，不接 DB。"""
     if not impressions:
         return "（暂无已有印象）"
     lines = []
@@ -127,7 +130,7 @@ def _format_existing_impressions(impressions: list[dict]) -> str:
 
 # ---- 核心流程 ----
 
-def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
+def extract_and_update(user_id: str, chat_history: list, previous_summary: str = "") -> dict:
     """从对话中提取印象 + 更新每日快照 + 生成会话摘要。
 
     返回 {"updated": bool, "session_summary": str}
@@ -135,12 +138,12 @@ def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
     if not config.DEEPSEEK_API_KEY or not chat_history:
         return {"updated": False, "session_summary": previous_summary}
 
-    impressions = _get_impressions()
+    impressions = _get_impressions(user_id)
 
     # 读跟宠名字用于格式化对话历史
     from db.database import get_companion_name
     try:
-        companion_name = get_companion_name()
+        companion_name = get_companion_name(user_id)
     except Exception:
         companion_name = "小白"
 
@@ -245,12 +248,12 @@ def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
     impressions = _apply_decay(impressions, now)
 
     if updated:
-        _save_impressions(impressions)
+        _save_impressions(user_id, impressions)
 
     # 每日快照
     daily = result.get("daily", {})
     if daily:
-        _update_daily_memo(daily)
+        _update_daily_memo(user_id, daily)
         updated = True
 
     # 会话摘要
@@ -260,7 +263,7 @@ def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
 
 
 def _apply_decay(impressions: list[dict], now) -> list[dict]:
-    """应用衰减规则，返回清理后的印象列表。"""
+    """应用衰减规则，返回清理后的印象列表。纯计算，不接 DB。"""
     result = []
     for imp in impressions:
         updated_at = imp.get("updated_at")
@@ -291,12 +294,12 @@ def _apply_decay(impressions: list[dict], now) -> list[dict]:
 
 # ---- 每日快照（简化版：只有 emotion + current_task） ----
 
-def _update_daily_memo(daily_data: dict) -> None:
+def _update_daily_memo(user_id: str, daily_data: dict) -> None:
     """覆盖式更新每日快照。"""
     now_str = now_cn().strftime("%Y-%m-%d %H:%M")
 
     try:
-        current = json.loads(get_daily_memo())
+        current = json.loads(get_daily_memo(user_id))
     except (json.JSONDecodeError, TypeError):
         current = {}
 
@@ -313,13 +316,13 @@ def _update_daily_memo(daily_data: dict) -> None:
             "updated_at": now_str,
         }
 
-    save_daily_memo(json.dumps(current, ensure_ascii=False))
+    save_daily_memo(user_id, json.dumps(current, ensure_ascii=False))
 
 
-def get_filtered_daily_memo() -> str:
+def get_filtered_daily_memo(user_id: str) -> str:
     """获取过滤后的每日记忆，返回可读文本。"""
     try:
-        current = json.loads(get_daily_memo())
+        current = json.loads(get_daily_memo(user_id))
     except (json.JSONDecodeError, TypeError):
         return ""
 
@@ -364,9 +367,9 @@ def get_filtered_daily_memo() -> str:
 
 # ---- 关键词匹配（零 API 成本） ----
 
-def bump_on_mention(user_input: str) -> None:
+def bump_on_mention(user_id: str, user_input: str) -> None:
     """用户输入命中已有印象关键词时，更新时间戳+计数。"""
-    impressions = _get_impressions()
+    impressions = _get_impressions(user_id)
     if not impressions:
         return
 
@@ -397,21 +400,21 @@ def bump_on_mention(user_input: str) -> None:
                 imp["promoted_at"] = now_str
                 logging.info(f"[Memory] 印象通过关键词匹配升级: {imp['content']}")
 
-    _save_impressions(impressions)
+    _save_impressions(user_id, impressions)
     logging.info("[Memory] 关键词命中，已更新印象计数")
 
 
 def _extract_keywords(text: str) -> list[str]:
-    """从文本中提取 2 字以上的关键词片段用于匹配。"""
+    """从文本中提取 2 字以上的关键词片段用于匹配。纯计算，不接 DB。"""
     segments = re.split(r'[，。、！？\s,.\-/()（）]+', text)
     return [s for s in segments if len(s) >= 2]
 
 
-# ---- 兼容旧接口 ----
+# ---- 入口接口 ----
 
-def update_ai_memory(chat_history: list, previous_summary: str = "") -> dict:
+def update_ai_memory(user_id: str, chat_history: list, previous_summary: str = "") -> dict:
     """入口函数：提取印象 + 每日快照 + 会话摘要。
 
     返回 {"updated": bool, "session_summary": str}
     """
-    return extract_and_update(chat_history, previous_summary=previous_summary)
+    return extract_and_update(user_id, chat_history, previous_summary=previous_summary)

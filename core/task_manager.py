@@ -1,18 +1,24 @@
 """任务管理：单任务闭环（创建 → 执行 → 暂停 → 完成/放弃）。
 
-重写为 Supabase REST API 调用，函数签名与原版一致。
+v2 多用户改造（2026-04-15）：所有公开函数第一个参数都是 user_id (UUID 字符串)。
+所有 SELECT/UPDATE/DELETE 必须带 user_id 过滤——SERIAL 主键 task.id 是全局的，
+不带 user_id 过滤理论上可能跨用户操作（虽然 RLS 是 backstop，但代码层不能依赖它）。
 """
 
 from db.database import _get, _post, _patch, _delete, now_cn
 
 
-def _get_task_by_id(task_id: int) -> dict:
-    """按 ID 查任务。"""
-    rows = _get("task", {"id": f"eq.{task_id}", "select": "*"})
+def _get_task_by_id(user_id: str, task_id: int) -> dict:
+    """按 ID 查任务（限本人）。"""
+    rows = _get("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+        "select": "*",
+    })
     return rows[0] if rows else {}
 
 
-def create_task(keyword: str, combo: str, energy_level: int,
+def create_task(user_id: str, keyword: str, combo: str, energy_level: int,
                 suggested_minutes: int | None = None,
                 task_type: str = "work",
                 auto_start: bool = True,
@@ -21,7 +27,7 @@ def create_task(keyword: str, combo: str, energy_level: int,
     status = "executing" if auto_start else "idle"
 
     if auto_start:
-        executing = get_executing_task()
+        executing = get_executing_task(user_id)
         if executing:
             raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
 
@@ -29,6 +35,7 @@ def create_task(keyword: str, combo: str, energy_level: int,
     started_at = now if auto_start else None
 
     row = _post("task", {
+        "user_id": user_id,
         "keyword": keyword,
         "combo": combo,
         "energy_at_start": energy_level,
@@ -47,47 +54,63 @@ def create_task(keyword: str, combo: str, energy_level: int,
     }
 
 
-def pause_task(task_id: int) -> dict:
+def pause_task(user_id: str, task_id: int) -> dict:
     """暂停任务：executing → paused。"""
     now = now_cn().isoformat()
-    _patch("task", {"id": f"eq.{task_id}", "status": "eq.executing"},
-           {"status": "paused", "paused_at": now}, return_row=False)
-    return _get_task_by_id(task_id)
+    _patch("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+        "status": "eq.executing",
+    }, {"status": "paused", "paused_at": now}, return_row=False)
+    return _get_task_by_id(user_id, task_id)
 
 
-def resume_task(task_id: int) -> dict:
+def resume_task(user_id: str, task_id: int) -> dict:
     """继续任务：paused → executing。"""
-    _patch("task", {"id": f"eq.{task_id}", "status": "eq.paused"},
-           {"status": "executing", "paused_at": None}, return_row=False)
-    return _get_task_by_id(task_id)
+    _patch("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+        "status": "eq.paused",
+    }, {"status": "executing", "paused_at": None}, return_row=False)
+    return _get_task_by_id(user_id, task_id)
 
 
-def complete_task(task_id: int) -> dict:
+def complete_task(user_id: str, task_id: int) -> dict:
     """完成任务：executing/paused → completed。"""
     now = now_cn().isoformat()
-    _patch("task", {"id": f"eq.{task_id}", "status": "in.(executing,paused)"},
-           {"status": "completed", "completed_at": now}, return_row=False)
-    return _get_task_by_id(task_id)
+    _patch("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+        "status": "in.(executing,paused)",
+    }, {"status": "completed", "completed_at": now}, return_row=False)
+    return _get_task_by_id(user_id, task_id)
 
 
-def abandon_task(task_id: int) -> dict:
+def abandon_task(user_id: str, task_id: int) -> dict:
     """放弃任务：executing/paused → abandoned。"""
     now = now_cn().isoformat()
-    _patch("task", {"id": f"eq.{task_id}", "status": "in.(executing,paused)"},
-           {"status": "abandoned", "completed_at": now}, return_row=False)
-    return _get_task_by_id(task_id)
+    _patch("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+        "status": "in.(executing,paused)",
+    }, {"status": "abandoned", "completed_at": now}, return_row=False)
+    return _get_task_by_id(user_id, task_id)
 
 
-def update_task_minutes(task_id: int, minutes: int) -> dict:
+def update_task_minutes(user_id: str, task_id: int, minutes: int) -> dict:
     """修改任务的建议时长。"""
-    _patch("task", {"id": f"eq.{task_id}"}, {"default_minutes": minutes}, return_row=False)
-    return _get_task_by_id(task_id)
+    _patch("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+    }, {"default_minutes": minutes}, return_row=False)
+    return _get_task_by_id(user_id, task_id)
 
 
-def get_today_tasks() -> list[dict]:
+def get_today_tasks(user_id: str) -> list[dict]:
     """获取今天的所有任务（不含已放弃），按创建时间倒序。"""
     today_start = now_cn().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     return _get("task", {
+        "user_id": f"eq.{user_id}",
         "created_at": f"gte.{today_start}",
         "status": "neq.abandoned",
         "select": "*",
@@ -95,9 +118,10 @@ def get_today_tasks() -> list[dict]:
     })
 
 
-def get_executing_task() -> dict | None:
+def get_executing_task(user_id: str) -> dict | None:
     """获取当前正在执行的任务，没有则返回 None。"""
     rows = _get("task", {
+        "user_id": f"eq.{user_id}",
         "status": "eq.executing",
         "select": "*",
         "order": "created_at.desc",
@@ -106,9 +130,10 @@ def get_executing_task() -> dict | None:
     return rows[0] if rows else None
 
 
-def get_active_task() -> dict | None:
+def get_active_task(user_id: str) -> dict | None:
     """获取当前活跃任务（executing 或 paused），没有则返回 None。"""
     rows = _get("task", {
+        "user_id": f"eq.{user_id}",
         "status": "in.(executing,paused)",
         "select": "*",
         "order": "created_at.desc",
@@ -123,10 +148,11 @@ def get_active_task() -> dict | None:
 
 # ---- 循环任务 ----
 
-def create_recurring_task(keyword: str, task_type: str = "work",
+def create_recurring_task(user_id: str, keyword: str, task_type: str = "work",
                           default_minutes: int | None = None) -> dict:
     """创建一个每日循环任务模板。"""
     row = _post("recurring_task", {
+        "user_id": user_id,
         "keyword": keyword,
         "task_type": task_type,
         "default_minutes": default_minutes,
@@ -135,30 +161,39 @@ def create_recurring_task(keyword: str, task_type: str = "work",
                    "default_minutes": default_minutes, "active": 1}
 
 
-def get_recurring_tasks() -> list[dict]:
+def get_recurring_tasks(user_id: str) -> list[dict]:
     """获取所有启用的循环任务模板。"""
     return _get("recurring_task", {
+        "user_id": f"eq.{user_id}",
         "active": "eq.1",
         "select": "*",
         "order": "created_at.asc",
     })
 
 
-def delete_recurring_task(rec_id: int) -> None:
+def delete_recurring_task(user_id: str, rec_id: int) -> None:
     """停用循环任务（软删除）。"""
-    _patch("recurring_task", {"id": f"eq.{rec_id}"}, {"active": 0}, return_row=False)
+    _patch("recurring_task", {
+        "id": f"eq.{rec_id}",
+        "user_id": f"eq.{user_id}",
+    }, {"active": 0}, return_row=False)
 
 
-def spawn_daily_tasks() -> None:
-    """每天首次调用时，为所有启用的循环任务生成今日 idle 任务。"""
+def spawn_daily_tasks(user_id: str) -> None:
+    """每天首次调用时，为该用户所有启用的循环任务生成今日 idle 任务。"""
     today_start = now_cn().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     now = now_cn().isoformat()
 
-    recurring = _get("recurring_task", {"active": "eq.1", "select": "*"})
+    recurring = _get("recurring_task", {
+        "user_id": f"eq.{user_id}",
+        "active": "eq.1",
+        "select": "*",
+    })
 
     for rec in recurring:
         # 检查今天是否已有该循环任务
         existing = _get("task", {
+            "user_id": f"eq.{user_id}",
             "keyword": f"eq.{rec['keyword']}",
             "created_at": f"gte.{today_start}",
             "combo": "eq.recurring",
@@ -168,6 +203,7 @@ def spawn_daily_tasks() -> None:
         })
         if not existing:
             _post("task", {
+                "user_id": user_id,
                 "keyword": rec["keyword"],
                 "combo": "recurring",
                 "energy_at_start": None,
@@ -178,26 +214,30 @@ def spawn_daily_tasks() -> None:
             }, return_row=False)
 
 
-def start_idle_task(task_id: int, energy_level: int) -> dict:
+def start_idle_task(user_id: str, task_id: int, energy_level: int) -> dict:
     """启动一个 idle 状态的任务。"""
-    executing = get_executing_task()
+    executing = get_executing_task(user_id)
     if executing:
         raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
 
     now = now_cn().isoformat()
-    _patch("task", {"id": f"eq.{task_id}", "status": "eq.idle"},
-           {"status": "executing", "energy_at_start": energy_level, "started_at": now},
-           return_row=False)
-    return _get_task_by_id(task_id)
+    _patch("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+        "status": "eq.idle",
+    }, {"status": "executing", "energy_at_start": energy_level, "started_at": now},
+       return_row=False)
+    return _get_task_by_id(user_id, task_id)
 
 
-def create_scheduled_task(keyword: str, scheduled_at: str, combo: str,
+def create_scheduled_task(user_id: str, keyword: str, scheduled_at: str, combo: str,
                           energy_level: int | None = None,
                           suggested_minutes: int | None = None,
                           task_type: str = "work") -> dict:
     """创建一个预定任务。"""
     now = now_cn().isoformat()
     row = _post("task", {
+        "user_id": user_id,
         "keyword": keyword,
         "combo": combo,
         "energy_at_start": energy_level,
@@ -214,38 +254,46 @@ def create_scheduled_task(keyword: str, scheduled_at: str, combo: str,
     }
 
 
-def get_scheduled_tasks() -> list[dict]:
+def get_scheduled_tasks(user_id: str) -> list[dict]:
     """获取所有预定任务，按预定时间排序。"""
     return _get("task", {
+        "user_id": f"eq.{user_id}",
         "status": "eq.scheduled",
         "select": "*",
         "order": "scheduled_at.asc",
     })
 
 
-def get_due_scheduled_tasks() -> list[dict]:
+def get_due_scheduled_tasks(user_id: str) -> list[dict]:
     """获取已到期的预定任务。"""
     now = now_cn().isoformat()
     return _get("task", {
+        "user_id": f"eq.{user_id}",
         "status": "eq.scheduled",
         "scheduled_at": f"lte.{now}",
         "select": "*",
     })
 
 
-def start_scheduled_task(task_id: int, energy_level: int) -> dict:
+def start_scheduled_task(user_id: str, task_id: int, energy_level: int) -> dict:
     """启动一个预定任务：scheduled → executing。"""
-    executing = get_executing_task()
+    executing = get_executing_task(user_id)
     if executing:
         raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
 
     now = now_cn().isoformat()
-    _patch("task", {"id": f"eq.{task_id}", "status": "eq.scheduled"},
-           {"status": "executing", "energy_at_start": energy_level, "started_at": now},
-           return_row=False)
-    return _get_task_by_id(task_id)
+    _patch("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+        "status": "eq.scheduled",
+    }, {"status": "executing", "energy_at_start": energy_level, "started_at": now},
+       return_row=False)
+    return _get_task_by_id(user_id, task_id)
 
 
-def delete_task(task_id: int) -> None:
-    """从数据库中彻底删除一个任务。"""
-    _delete("task", {"id": f"eq.{task_id}"})
+def delete_task(user_id: str, task_id: int) -> None:
+    """从数据库中彻底删除一个任务（限本人）。"""
+    _delete("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+    })

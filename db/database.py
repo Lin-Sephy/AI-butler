@@ -1,7 +1,9 @@
-"""Supabase (PostgREST) 数据库操作，替代原 SQLite 版本。
+"""Supabase (PostgREST) 数据库操作。
 
 通过 httpx 直接调用 Supabase REST API，无需官方 SDK。
-所有函数签名与原版保持一致，core/ 层不需要改动。
+v2 多用户改造（2026-04-15）：所有公开函数第一个参数都是 user_id (UUID 字符串)，
+对应 Supabase auth.users.id。后端用 SERVICE_KEY 跑（bypass RLS），所以查询里
+**必须手动**带 user_id 过滤——RLS 是 defense-in-depth，不是过滤靠山。
 """
 
 import httpx
@@ -72,87 +74,93 @@ def init_db():
     pass
 
 
+# ════════════════════════════════════════════════════════════
+# 以下所有公开函数：第一个参数 user_id = Supabase auth.users.id
+# user_profile 表的 PK 是 user_id；其他表用 user_id 列过滤
+# ════════════════════════════════════════════════════════════
+
+
 # ---- user_memo CRUD ----
 
-def get_user_memo() -> str:
+def get_user_memo(user_id: str) -> str:
     """获取用户手记内容。"""
-    rows = _get("user_profile", {"id": "eq.default_user", "select": "user_memo"})
+    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "user_memo"})
     if rows and rows[0].get("user_memo"):
         return rows[0]["user_memo"]
     return ""
 
 
-def save_user_memo(memo: str) -> None:
+def save_user_memo(user_id: str, memo: str) -> None:
     """保存用户手记内容。"""
-    _patch("user_profile", {"id": "eq.default_user"}, {"user_memo": memo}, return_row=False)
+    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"user_memo": memo}, return_row=False)
 
 
-def get_ai_memo() -> str:
+def get_ai_memo(user_id: str) -> str:
     """获取 AI 自动记忆内容。"""
-    rows = _get("user_profile", {"id": "eq.default_user", "select": "ai_memo"})
+    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "ai_memo"})
     if rows and rows[0].get("ai_memo"):
         return rows[0]["ai_memo"]
     return ""
 
 
-def save_ai_memo(memo: str) -> None:
+def save_ai_memo(user_id: str, memo: str) -> None:
     """保存 AI 自动记忆内容。"""
-    _patch("user_profile", {"id": "eq.default_user"}, {"ai_memo": memo}, return_row=False)
+    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"ai_memo": memo}, return_row=False)
 
 
-def clear_ai_memo() -> None:
+def clear_ai_memo(user_id: str) -> None:
     """清空 AI 自动记忆。"""
-    _patch("user_profile", {"id": "eq.default_user"}, {"ai_memo": ""}, return_row=False)
+    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"ai_memo": ""}, return_row=False)
 
 
-def get_daily_memo() -> str:
+def get_daily_memo(user_id: str) -> str:
     """获取每日记忆 JSON 字符串。"""
-    rows = _get("user_profile", {"id": "eq.default_user", "select": "daily_memo"})
+    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "daily_memo"})
     if rows and rows[0].get("daily_memo"):
         return rows[0]["daily_memo"]
     return "{}"
 
 
-def save_daily_memo(memo: str) -> None:
+def save_daily_memo(user_id: str, memo: str) -> None:
     """保存每日记忆 JSON 字符串。"""
-    _patch("user_profile", {"id": "eq.default_user"}, {"daily_memo": memo}, return_row=False)
+    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"daily_memo": memo}, return_row=False)
 
 
 # ---- 跟宠名字 + 自定义人格 CRUD ----
 
-def get_companion_name() -> str:
+def get_companion_name(user_id: str) -> str:
     """获取跟宠名字，默认 '小白'。"""
-    rows = _get("user_profile", {"id": "eq.default_user", "select": "companion_name"})
+    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "companion_name"})
     if rows and rows[0].get("companion_name"):
         return rows[0]["companion_name"]
     return "小白"
 
 
-def save_companion_name(name: str) -> None:
+def save_companion_name(user_id: str, name: str) -> None:
     """保存跟宠名字。"""
-    _patch("user_profile", {"id": "eq.default_user"}, {"companion_name": name}, return_row=False)
+    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"companion_name": name}, return_row=False)
 
 
-def get_custom_persona() -> str:
+def get_custom_persona(user_id: str) -> str:
     """获取自定义人格描述，空字符串表示使用 MBTI 预设。"""
-    rows = _get("user_profile", {"id": "eq.default_user", "select": "custom_persona"})
+    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "custom_persona"})
     if rows and rows[0].get("custom_persona"):
         return rows[0]["custom_persona"]
     return ""
 
 
-def save_custom_persona(persona: str) -> None:
+def save_custom_persona(user_id: str, persona: str) -> None:
     """保存自定义人格描述。"""
-    _patch("user_profile", {"id": "eq.default_user"}, {"custom_persona": persona}, return_row=False)
+    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"custom_persona": persona}, return_row=False)
 
 
-def get_companion_profile() -> dict:
+def get_companion_profile(user_id: str) -> dict:
     """一次取出跟宠名字 + 自定义人格，省一次数据库请求。
 
     返回 {"name": str, "custom_persona": str}
     """
     rows = _get("user_profile", {
-        "id": "eq.default_user",
+        "user_id": f"eq.{user_id}",
         "select": "companion_name,custom_persona",
     })
     if not rows:
@@ -166,10 +174,11 @@ def get_companion_profile() -> dict:
 
 # ---- chat_session CRUD ----
 
-def save_chat_message(session_id: str, role: str, content: str) -> None:
+def save_chat_message(user_id: str, session_id: str, role: str, content: str) -> None:
     """保存一条聊天消息。"""
     today = now_cn().strftime("%Y-%m-%d")
     _post("chat_session", {
+        "user_id": user_id,
         "session_id": session_id,
         "role": role,
         "content": content,
@@ -178,9 +187,10 @@ def save_chat_message(session_id: str, role: str, content: str) -> None:
     }, return_row=False)
 
 
-def load_session_messages(session_id: str) -> list[dict]:
+def load_session_messages(user_id: str, session_id: str) -> list[dict]:
     """加载指定 session 的所有聊天消息。"""
     rows = _get("chat_session", {
+        "user_id": f"eq.{user_id}",
         "session_id": f"eq.{session_id}",
         "select": "role,content",
         "order": "created_at.asc",
@@ -190,10 +200,11 @@ def load_session_messages(session_id: str) -> list[dict]:
 
 # ---- 精力记录 CRUD ----
 
-def save_energy(energy_level: int, source: str) -> dict:
+def save_energy(user_id: str, energy_level: int, source: str) -> dict:
     """写入一条精力记录，返回写入结果。"""
     now = now_cn().isoformat()
     _post("energy_log", {
+        "user_id": user_id,
         "energy_level": energy_level,
         "source": source,
         "created_at": now,
@@ -201,10 +212,11 @@ def save_energy(energy_level: int, source: str) -> dict:
     return {"energy_level": energy_level, "source": source, "updated_at": now}
 
 
-def get_today_energy() -> dict | None:
+def get_today_energy(user_id: str) -> dict | None:
     """获取今天最新一条精力记录，没有则返回 None。"""
     today_start = now_cn().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     rows = _get("energy_log", {
+        "user_id": f"eq.{user_id}",
         "created_at": f"gte.{today_start}",
         "select": "energy_level,source,created_at",
         "order": "created_at.desc",
@@ -219,10 +231,11 @@ def get_today_energy() -> dict | None:
     return None
 
 
-def get_avg_energy_7d() -> float | None:
+def get_avg_energy_7d(user_id: str) -> float | None:
     """过去 7 天精力均值（每天取最后一条），无数据返回 None。"""
     seven_days_ago = (now_cn() - timedelta(days=7)).isoformat()
     rows = _get("energy_log", {
+        "user_id": f"eq.{user_id}",
         "created_at": f"gte.{seven_days_ago}",
         "select": "energy_level,created_at",
         "order": "created_at.desc",
@@ -241,10 +254,11 @@ def get_avg_energy_7d() -> float | None:
 
 # ---- action_log CRUD ----
 
-def save_action_log(energy: int, intent: str, strategy: str,
+def save_action_log(user_id: str, energy: int, intent: str, strategy: str,
                     recommendation: str, user_action: str) -> None:
     """记录用户对推荐的反馈。"""
     _post("action_log", {
+        "user_id": user_id,
         "energy_at_action": energy,
         "intent": intent,
         "strategy": strategy,

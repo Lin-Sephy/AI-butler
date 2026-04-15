@@ -2,3 +2,7 @@ streamlit
 httpx
 openai
 python-dotenv
+fastapi
+uvicorn[standard]
+pydantic
+PyJWT[crypto]
