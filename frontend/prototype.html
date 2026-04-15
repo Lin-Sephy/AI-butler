@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 身体状态计划管家 — 视觉原型调参</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Fraunces:wght@300;400;500;600&family=IBM+Plex+Serif:wght@300;400;500&family=Cormorant:wght@300;400;500;600&family=Noto+Serif+SC:wght@300;400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    /* Colors (HSL decomposed for slider control) */
+    /* base 起源自 参考_真实雪地_纹理.jpg HSL(222,25%,76%)，Sephy 探索后选定饱和度 57%、亮度 96% 的"淡蓝紫雪地" */
+    --base-h: 222; --base-s: 57%; --base-l: 96%;      /* 淡蓝紫雪地（v1 选定） */
+    --primary-h: 202; --primary-s: 45%; --primary-l: 52%;  /* #4896c4 克制雾蓝 */
+    --accent-h: 198; --accent-s: 45%; --accent-l: 85%;     /* #c1dfeb 浅冰蓝 */
+    --text-h: 240; --text-s: 3%; --text-l: 21%;            /* #373639 偏灰黑 */
+
+    --color-base: hsl(var(--base-h), var(--base-s), var(--base-l));
+    --color-primary: hsl(var(--primary-h), var(--primary-s), var(--primary-l));
+    --color-accent: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+    --color-text: hsl(var(--text-h), var(--text-s), var(--text-l));
+    --color-subtle: hsl(var(--text-h), var(--text-s), 45%);
+    --color-line: hsl(var(--text-h), var(--text-s), 85%);
+    --color-surface: #ffffff;
+    --color-primary-soft: hsl(var(--primary-h), var(--primary-s), 93%);
+    --color-accent-soft: hsl(var(--accent-h), var(--accent-s), 95%);
+
+    /* Shape & motion */
+    --radius: 20px;
+    --transition: 350ms;
+    --shadow-blur: 0px;     /* 默认无硬阴影——绘本感靠线不靠浮 */
+    --shadow-opacity: 0;
+
+    /* Type — 衬线主导，手帐/绘本感 */
+    --font-weight: 400;
+    --font-family: 'IBM Plex Serif', 'Noto Serif SC', Georgia, serif;
+    --line-height: 1.6;
+
+    /* Texture layers */
+    --paper-texture: 0.22;   /* 纸感加强 */
+    --forest-watermark: 0;   /* 针叶默认关——色系撞 */
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font-family);
+    font-weight: var(--font-weight);
+    line-height: var(--line-height);
+    color: var(--color-text);
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* ═══════════ Preview (left) ═══════════ */
+  .preview {
+    flex: 1;
+    background: var(--color-base);
+    padding: 48px 56px 80px;
+    overflow-y: auto;
+    position: relative;
+  }
+  /* Paper noise + forest watermark as layered backgrounds */
+  .preview::before {
+    content: ''; position: fixed; inset: 0; right: 360px; pointer-events: none;
+    opacity: var(--paper-texture);
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+  .preview::after {
+    content: ''; position: fixed; inset: 0; right: 360px; pointer-events: none;
+    opacity: var(--forest-watermark);
+    background-repeat: repeat;
+    background-size: 360px 240px;
+    /* 冷灰蓝针叶（不走绿色）；默认关，需要的话拉滑杆 */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='240' viewBox='0 0 360 240'><g fill='%234896c4' opacity='0.45'><path d='M40 200 L30 160 L50 160 Z M35 170 L25 130 L45 130 Z M37 140 L28 100 L46 100 Z'/><path d='M140 210 L128 170 L152 170 Z M134 180 L124 140 L144 140 Z'/><path d='M260 200 L248 160 L272 160 Z M254 170 L244 130 L264 130 Z M256 140 L247 100 L265 100 Z M258 110 L250 80 L266 80 Z'/><path d='M340 205 L330 170 L350 170 Z M335 180 L325 145 L345 145 Z'/></g></svg>");
+  }
+
+  .section { margin-bottom: 48px; position: relative; z-index: 1; }
+  .section-label {
+    font-size: 12px;
+    color: var(--color-subtle); margin-bottom: 16px; font-weight: 400;
+    font-style: italic;
+    font-family: inherit;
+    letter-spacing: 0.02em;
+  }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+
+  /* ─── Task card ─── */
+  .task-card {
+    background: var(--color-surface);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    box-shadow: 0 2px var(--shadow-blur) rgba(55,54,57,var(--shadow-opacity));
+    display: flex; align-items: center; gap: 16px;
+    width: 100%; max-width: 520px;
+    transition: var(--transition) ease-out;
+    margin-bottom: 12px;
+    border: 1px solid var(--color-line);   /* 绘本感：靠线描边替代硬阴影浮起 */
+  }
+  .task-card:hover {
+    border-color: var(--color-primary);
+    background: var(--color-accent-soft);
+  }
+  .task-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--color-accent); flex-shrink: 0;
+    border: 1px solid var(--color-primary);
+  }
+  .task-dot.done { background: var(--color-primary); border-color: var(--color-primary); }
+  .task-body { flex: 1; min-width: 0; }
+  .task-title { font-size: 16px; font-weight: 400; margin-bottom: 3px; letter-spacing: -0.005em; }
+  .task-meta { font-size: 12px; color: var(--color-subtle); display: flex; gap: 10px; font-family: 'Inter', system-ui, sans-serif; }
+  .task-meta .chip { padding: 2px 10px; border-radius: 99px; background: var(--color-accent-soft); color: var(--color-primary); font-size: 11px; border: 1px solid var(--color-accent); }
+  .task-actions { display: flex; gap: 4px; }
+  .icon-btn {
+    width: 34px; height: 34px; border: none; background: transparent;
+    border-radius: 10px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--color-subtle);
+    transition: var(--transition) ease-out;
+  }
+  .icon-btn:hover { background: var(--color-primary-soft); color: var(--color-primary); }
+  .icon-btn svg { width: 18px; height: 18px; stroke-width: 1.6; }
+
+  /* ─── Buttons ─── */
+  .btn-primary, .btn-secondary {
+    padding: 12px 26px; border-radius: var(--radius);
+    font-weight: 400; font-size: 15px; cursor: pointer;
+    font-family: inherit; letter-spacing: 0.01em;
+    transition: var(--transition) ease-out;
+    border: 1px solid var(--color-primary);
+  }
+  .btn-primary { background: var(--color-primary); color: #fff; }
+  .btn-primary:hover { background: hsl(var(--primary-h), var(--primary-s), 45%); }
+  .btn-secondary { background: var(--color-surface); color: var(--color-primary); }
+  .btn-secondary:hover { background: var(--color-accent-soft); }
+
+  /* ─── Chat bubbles ─── */
+  .chat-panel {
+    width: 100%; max-width: 520px;
+    background: var(--color-surface);
+    border-radius: var(--radius);
+    padding: 20px 18px;
+    border: 1px solid var(--color-line);
+    box-shadow: 0 2px var(--shadow-blur) rgba(55,54,57,var(--shadow-opacity));
+  }
+  .chat-row { display: flex; margin-bottom: 14px; align-items: flex-end; gap: 8px; }
+  .chat-row:last-child { margin-bottom: 0; }
+  .chat-row.me { justify-content: flex-end; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--color-primary-soft);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .avatar svg { width: 20px; height: 20px; }
+  .bubble {
+    max-width: 75%; padding: 10px 14px; border-radius: 14px;
+    font-size: 14px; line-height: 1.5; letter-spacing: -0.003em;
+  }
+  .bubble.ai {
+    background: var(--color-accent-soft);
+    color: var(--color-text);
+    border: 1px solid var(--color-accent);
+    border-bottom-left-radius: 4px;
+  }
+  .bubble.me {
+    background: var(--color-primary);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+    font-family: inherit;
+  }
+
+  /* ─── Timer (focus overlay preview) ─── */
+  .timer-card {
+    background: var(--color-surface);
+    border-radius: var(--radius);
+    padding: 36px 48px;
+    border: 1px solid var(--color-line);
+    box-shadow: 0 2px var(--shadow-blur) rgba(55,54,57,var(--shadow-opacity));
+    display: inline-flex; flex-direction: column; align-items: center; gap: 14px;
+  }
+  .timer {
+    font-size: 88px;
+    font-weight: 300;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    color: var(--color-text);
+    line-height: 1;
+    font-family: inherit;
+    font-feature-settings: "ss01";
+  }
+  .timer-label { font-size: 13px; color: var(--color-subtle); font-style: italic; }
+
+  /* ─── Empty state ─── */
+  .empty-state {
+    background: var(--color-surface);
+    border: 1px dashed var(--color-accent);
+    border-radius: var(--radius);
+    padding: 56px 32px;
+    text-align: center;
+    max-width: 520px;
+  }
+  .empty-state p {
+    font-size: 17px; color: var(--color-subtle);
+    font-style: italic; letter-spacing: 0.005em;
+    font-family: inherit;
+  }
+
+  /* ─── Tab bar ─── */
+  .tab-bar {
+    display: flex; justify-content: space-around;
+    width: 100%; max-width: 520px;
+    padding: 14px 0 12px;
+    background: var(--color-surface);
+    border-radius: var(--radius) var(--radius) 0 0;
+    border: 1px solid var(--color-line);
+    border-bottom: none;
+  }
+  .tab {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    font-size: 12px; color: var(--color-subtle); cursor: pointer;
+    transition: var(--transition) ease-out;
+    padding: 4px 14px;
+    font-family: inherit;
+  }
+  .tab svg { width: 22px; height: 22px; stroke-width: 1.5; }
+  .tab.active { color: var(--color-primary); }
+
+  /* ─── Input + divider ─── */
+  .input {
+    width: 100%; max-width: 520px;
+    padding: 14px 18px;
+    border-radius: var(--radius);
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    font: inherit; color: var(--color-text);
+    transition: border-color var(--transition);
+  }
+  .input::placeholder { color: var(--color-subtle); font-style: italic; }
+  .input:focus { outline: none; border-color: var(--color-primary); }
+
+  .divider {
+    width: 100%; max-width: 520px;
+    height: 1px; margin: 8px 0;
+    /* 手绘虚线感替代纯色硬线 */
+    background-image: linear-gradient(to right, var(--color-line) 50%, transparent 50%);
+    background-size: 8px 1px; background-repeat: repeat-x;
+  }
+
+  /* ═══════════ Controls (right) ═══════════ */
+  .controls {
+    width: 360px;
+    flex-shrink: 0;
+    background: #fafafa;
+    border-left: 1px solid #e5e5e5;
+    overflow-y: auto;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 12px;
+  }
+  .controls-header {
+    position: sticky; top: 0; z-index: 10;
+    background: #fafafa;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid #eee;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .controls-header h1 { font-size: 13px; font-weight: 600; color: #222; }
+  .export-btn {
+    padding: 6px 12px;
+    background: #222; color: #fff;
+    border: none; border-radius: 6px;
+    font-size: 11px; cursor: pointer;
+    font-family: inherit;
+    transition: background 0.2s;
+  }
+  .export-btn:hover { background: #444; }
+  .reset-btn {
+    padding: 6px 10px;
+    background: transparent; color: #666;
+    border: 1px solid #ccc; border-radius: 6px;
+    font-size: 11px; cursor: pointer;
+    font-family: inherit;
+  }
+  .reset-btn:hover { background: #eee; }
+
+  .controls-body { padding: 8px 20px 40px; }
+  .group { margin-top: 20px; }
+  .group-title {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: #999; font-weight: 600; margin-bottom: 8px; padding-top: 8px;
+    border-top: 1px solid #eee;
+  }
+  .group:first-child .group-title { border-top: none; padding-top: 0; }
+
+  .ctrl {
+    display: grid;
+    grid-template-columns: 80px 1fr 52px;
+    align-items: center; gap: 8px;
+    margin: 6px 0;
+  }
+  .ctrl label { font-size: 11px; color: #555; }
+  .ctrl input[type=range] { width: 100%; }
+  .ctrl input[type=number] { width: 52px; padding: 3px 4px; font-size: 11px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; }
+  .ctrl select { grid-column: 2 / span 2; padding: 4px; font-size: 11px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; }
+
+  .swatch {
+    display: inline-block; width: 16px; height: 16px;
+    border-radius: 4px; vertical-align: middle;
+    margin-right: 6px; border: 1px solid #ddd;
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ LEFT: RENDER AREA ═══════════════ -->
+<div class="preview">
+
+  <section class="section">
+    <div class="section-label">任务卡</div>
+    <div class="task-card">
+      <div class="task-dot"></div>
+      <div class="task-body">
+        <div class="task-title">写论文引言段</div>
+        <div class="task-meta"><span>25 min</span><span class="chip">work</span></div>
+      </div>
+      <div class="task-actions">
+        <button class="icon-btn" title="开始"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></button>
+        <button class="icon-btn" title="完成"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></button>
+        <button class="icon-btn" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path></svg></button>
+      </div>
+    </div>
+    <div class="task-card">
+      <div class="task-dot done"></div>
+      <div class="task-body">
+        <div class="task-title">整理桌面</div>
+        <div class="task-meta"><span>10 min</span><span class="chip" style="background:hsl(var(--text-h),var(--text-s),92%);color:var(--color-subtle);">已完成</span></div>
+      </div>
+      <div class="task-actions">
+        <button class="icon-btn" title="详情"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-label">按钮</div>
+    <div class="row">
+      <button class="btn-primary">开始专注</button>
+      <button class="btn-secondary">再聊聊</button>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-label">聊天气泡（小白聊天室）</div>
+    <div class="chat-panel">
+      <div class="chat-row">
+        <div class="avatar" title="小白">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"></circle><circle cx="9" cy="10" r="1" fill="currentColor"></circle><circle cx="15" cy="10" r="1" fill="currentColor"></circle><path d="M10 15 Q12 16.5 14 15"></path></svg>
+        </div>
+        <div class="bubble ai">嗨~ 今天想先做点什么？我看你日程还空着。</div>
+      </div>
+      <div class="chat-row me">
+        <div class="bubble me">想写论文但提不起劲</div>
+      </div>
+      <div class="chat-row">
+        <div class="avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"></circle><circle cx="9" cy="10" r="1" fill="currentColor"></circle><circle cx="15" cy="10" r="1" fill="currentColor"></circle><path d="M10 15 Q12 16.5 14 15"></path></svg></div>
+        <div class="bubble ai">那就从最小的开始——只写 25 分钟的引言段，不用想全文。要不要记上？</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-label">计时器（专注遮罩）</div>
+    <div class="timer-card">
+      <div class="timer">24:53</div>
+      <div class="timer-label">FOCUS · 写论文引言段</div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-label">空状态</div>
+    <div class="empty-state">
+      <p>今天还没给自己安排点什么呢</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-label">输入框 & 分隔线</div>
+    <input class="input" placeholder="跟小白说说今天的状态..." />
+    <div class="divider" style="margin-top:24px;"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-label">底部导航（四页 Tab）</div>
+    <div class="tab-bar">
+      <div class="tab active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+        任务
+      </div>
+      <div class="tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        聊天
+      </div>
+      <div class="tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+        数据
+      </div>
+      <div class="tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+        我的
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ═══════════════ RIGHT: CONTROLS ═══════════════ -->
+<aside class="controls">
+  <div class="controls-header">
+    <h1>视觉调参</h1>
+    <div style="display:flex;gap:6px;">
+      <button class="reset-btn" onclick="resetTokens()">重置</button>
+      <button class="export-btn" onclick="exportTokens()">导出 JSON</button>
+    </div>
+  </div>
+  <div class="controls-body" id="controlsBody">
+    <!-- Injected by JS -->
+  </div>
+</aside>
+
+<script>
+// ══════════════════════════════════════════════════
+// Token schema + defaults
+// ══════════════════════════════════════════════════
+const DEFAULTS = {
+  // Colors (HSL)
+  // base 起源自 参考_真实雪地_纹理.jpg HSL(222,25%,76%)，Sephy 选定为 (222,57%,96%) "淡蓝紫雪地" v1
+  // primary/accent 取自 色板_像素雪地_UI主池.swatches；放弃绿色，蓝/白/黑/灰作主，粉只给白鼬五官
+  base:    { h: 222, s: 57, l: 96 },     // 淡蓝紫雪地（v1 选定）
+  primary: { h: 202, s: 45, l: 52 },     // #4896c4 克制雾蓝
+  accent:  { h: 198, s: 45, l: 85 },     // #c1dfeb 浅冰蓝
+  text:    { h: 240, s: 3,  l: 21 },     // #373639 偏灰黑
+  // Shape & motion
+  radius: 20,
+  transition: 350,
+  shadowBlur: 0,        // 默认无硬阴影——绘本感靠线不靠浮
+  shadowOpacity: 0,
+  // Type — IBM Plex Serif 主，温润且有现代感
+  fontWeight: 400,
+  fontFamily: "'IBM Plex Serif', 'Noto Serif SC', Georgia, serif",
+  lineHeight: 1.6,
+  // Texture
+  paperTexture: 0.22,
+  forestWatermark: 0,    // 默认关；要的话拉滑杆，色已改成冷蓝
+};
+
+const CONTROLS = [
+  { group: '底色 Base', type: 'color', key: 'base' },
+  { group: '主色 Primary', type: 'color', key: 'primary' },
+  { group: '辅色 Accent', type: 'color', key: 'accent' },
+  { group: '点缀/文字 Text', type: 'color', key: 'text' },
+  { group: '形状', items: [
+    { label: '圆角', key: 'radius', type: 'range', min: 0, max: 24, step: 1, unit: 'px' },
+    { label: '阴影模糊', key: 'shadowBlur', type: 'range', min: 0, max: 24, step: 1, unit: 'px' },
+    { label: '阴影深度', key: 'shadowOpacity', type: 'range', min: 0, max: 0.3, step: 0.01 },
+  ]},
+  { group: '动效', items: [
+    { label: '过渡时长', key: 'transition', type: 'range', min: 100, max: 600, step: 10, unit: 'ms' },
+  ]},
+  { group: '字体', items: [
+    { label: '字体族', key: 'fontFamily', type: 'select', options: [
+      { value: "'IBM Plex Serif', 'Noto Serif SC', Georgia, serif", label: 'IBM Plex Serif（默认）' },
+      { value: "'Fraunces', 'Noto Serif SC', Georgia, serif", label: 'Fraunces（手帐衬线）' },
+      { value: "'Cormorant', 'Noto Serif SC', Georgia, serif", label: 'Cormorant（优雅衬线）' },
+      { value: "'Inter', system-ui, -apple-system, sans-serif", label: 'Inter（细线 sans 偏 SaaS）' },
+      { value: "system-ui, -apple-system, sans-serif", label: '系统默认' },
+    ]},
+    { label: '字重', key: 'fontWeight', type: 'range', min: 200, max: 700, step: 50 },
+    { label: '行距', key: 'lineHeight', type: 'range', min: 1.2, max: 2.0, step: 0.05 },
+  ]},
+  { group: '纹理', items: [
+    { label: '纸纹强度', key: 'paperTexture', type: 'range', min: 0, max: 0.5, step: 0.01 },
+    { label: '针叶暗纹', key: 'forestWatermark', type: 'range', min: 0, max: 0.3, step: 0.01 },
+  ]},
+];
+
+let state = JSON.parse(JSON.stringify(DEFAULTS));
+
+// ══════════════════════════════════════════════════
+// Apply state → CSS vars
+// ══════════════════════════════════════════════════
+function applyState() {
+  const r = document.documentElement;
+  ['base','primary','accent','text'].forEach(k => {
+    r.style.setProperty(`--${k}-h`, state[k].h);
+    r.style.setProperty(`--${k}-s`, state[k].s + '%');
+    r.style.setProperty(`--${k}-l`, state[k].l + '%');
+  });
+  r.style.setProperty('--radius', state.radius + 'px');
+  r.style.setProperty('--transition', state.transition + 'ms');
+  r.style.setProperty('--shadow-blur', state.shadowBlur + 'px');
+  r.style.setProperty('--shadow-opacity', state.shadowOpacity);
+  r.style.setProperty('--font-weight', state.fontWeight);
+  r.style.setProperty('--font-family', state.fontFamily);
+  r.style.setProperty('--line-height', state.lineHeight);
+  r.style.setProperty('--paper-texture', state.paperTexture);
+  r.style.setProperty('--forest-watermark', state.forestWatermark);
+
+  // Update swatches
+  document.querySelectorAll('[data-swatch]').forEach(el => {
+    const key = el.dataset.swatch;
+    el.style.background = `hsl(${state[key].h}, ${state[key].s}%, ${state[key].l}%)`;
+  });
+}
+
+// ══════════════════════════════════════════════════
+// Build controls UI
+// ══════════════════════════════════════════════════
+function buildControls() {
+  const body = document.getElementById('controlsBody');
+  body.innerHTML = '';
+
+  CONTROLS.forEach(group => {
+    const g = document.createElement('div');
+    g.className = 'group';
+    g.innerHTML = `<div class="group-title">${group.type === 'color'
+      ? `<span class="swatch" data-swatch="${group.key}"></span>${group.group}`
+      : group.group}</div>`;
+
+    if (group.type === 'color') {
+      ['h','s','l'].forEach(axis => {
+        const max = axis === 'h' ? 360 : 100;
+        const label = axis === 'h' ? 'Hue 色相' : axis === 's' ? 'Sat 饱和' : 'Light 亮度';
+        g.appendChild(makeRange(label, [group.key, axis], 0, max, 1));
+      });
+    } else {
+      group.items.forEach(item => {
+        if (item.type === 'range') {
+          g.appendChild(makeRange(item.label, [item.key], item.min, item.max, item.step, item.unit));
+        } else if (item.type === 'select') {
+          g.appendChild(makeSelect(item.label, item.key, item.options));
+        }
+      });
+    }
+    body.appendChild(g);
+  });
+}
+
+function makeRange(label, path, min, max, step, unit = '') {
+  const row = document.createElement('div');
+  row.className = 'ctrl';
+  const val = path.length === 1 ? state[path[0]] : state[path[0]][path[1]];
+  row.innerHTML = `
+    <label>${label}</label>
+    <input type="range" min="${min}" max="${max}" step="${step}" value="${val}">
+    <input type="number" min="${min}" max="${max}" step="${step}" value="${val}">
+  `;
+  const [range, number] = row.querySelectorAll('input');
+  const sync = (v) => {
+    const n = parseFloat(v);
+    range.value = n; number.value = n;
+    if (path.length === 1) state[path[0]] = n;
+    else state[path[0]][path[1]] = n;
+    applyState();
+  };
+  range.addEventListener('input', e => sync(e.target.value));
+  number.addEventListener('input', e => sync(e.target.value));
+  return row;
+}
+
+function makeSelect(label, key, options) {
+  const row = document.createElement('div');
+  row.className = 'ctrl';
+  row.innerHTML = `<label>${label}</label>
+    <select>${options.map(o =>
+      `<option value="${o.value.replace(/"/g,'&quot;')}" ${o.value === state[key] ? 'selected' : ''}>${o.label}</option>`
+    ).join('')}</select>`;
+  row.querySelector('select').addEventListener('change', e => {
+    state[key] = e.target.value;
+    applyState();
+  });
+  return row;
+}
+
+// ══════════════════════════════════════════════════
+// Export / Reset
+// ══════════════════════════════════════════════════
+function exportTokens() {
+  const tokens = {
+    meta: {
+      exportedAt: new Date().toISOString(),
+      source: 'prototype.html',
+      note: 'Design tokens for AI-butler v2. Paste to small-ke, who will convert to React design tokens.',
+    },
+    colors: {
+      base:    `hsl(${state.base.h}, ${state.base.s}%, ${state.base.l}%)`,
+      primary: `hsl(${state.primary.h}, ${state.primary.s}%, ${state.primary.l}%)`,
+      accent:  `hsl(${state.accent.h}, ${state.accent.s}%, ${state.accent.l}%)`,
+      text:    `hsl(${state.text.h}, ${state.text.s}%, ${state.text.l}%)`,
+    },
+    colorsHSL: {
+      base: state.base, primary: state.primary, accent: state.accent, text: state.text,
+    },
+    shape: {
+      radius: state.radius + 'px',
+      shadowBlur: state.shadowBlur + 'px',
+      shadowOpacity: state.shadowOpacity,
+    },
+    motion: {
+      transition: state.transition + 'ms',
+    },
+    type: {
+      fontFamily: state.fontFamily,
+      fontWeight: state.fontWeight,
+      lineHeight: state.lineHeight,
+    },
+    texture: {
+      paperTexture: state.paperTexture,
+      forestWatermark: state.forestWatermark,
+    },
+  };
+  const blob = new Blob([JSON.stringify(tokens, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'design-tokens.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function resetTokens() {
+  state = JSON.parse(JSON.stringify(DEFAULTS));
+  buildControls();
+  applyState();
+}
+
+// ══════════════════════════════════════════════════
+// Boot
+// ══════════════════════════════════════════════════
+buildControls();
+applyState();
+</script>
+
+</body>
+</html>

@@ -23,8 +23,7 @@ pictures/
 docs/AI笔友/
 docs/产品文档/
 docs/D盘清理计划.md
-docs/林千惠-简历-AI方向-草稿v1.md
-docs/林千惠-简历-AI方向-草稿v2.md
+docs/portfolio/
 
 # 记忆系统（私人，本地维护）
 anchor_db/
@@ -35,3 +34,4 @@ anchor_memory_lib/
 /book-room-v0.1-self-check.png
 /v0.2-preview.png
 /v0.3-bob.png
+/prototype-*.png
