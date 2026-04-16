@@ -1,24 +1,38 @@
 /**
- * 白鼬 SVG 组件——直接用 Sephy 给的 stoat-standing.svg。
+ * 白鼬 SVG 组件——按 state 切不同姿态。
  *
  * Props:
- *   view: "full" | "half"  默认 "half"
- *     - full：全身展示（闲玩 mode 居中）
- *     - half：只露上半身（聊天 mode 趴在聊天框上沿），靠 overflow:hidden 裁
+ *   view: "full" | "half"  默认 "full"
+ *     - full：全身展示
+ *     - half：只露上半身（靠 overflow:hidden 裁底）
  *   state: "idle" | "listening" | "thinking"
- *   width: 数字，默认 120
+ *     - idle      → stoat-front     正脸默认
+ *     - listening → stoat-side      侧脸（用户在打字）
+ *     - thinking  → stoat-side + 头顶 3 点泡泡
+ *   width: 数字，默认 220
+ *
+ * 所有姿态 SVG 比例统一约 1640:2554 ≈ 0.642（Sephy 出图时已对齐头身比）
  */
 
-import stoatSrc from '../assets/stoat-standing.svg'
+import frontSrc from '../assets/stoat-front.svg'
+import sideSrc from '../assets/stoat-side.svg'
 
-export default function StoatHalf({ view = 'half', state = 'idle', width = 120 }) {
-  // SVG 原图比例 1103:1461 ≈ 0.755。half 视图只露上 50%，容器高度按比例算
-  const fullHeight = width / 0.755
+const SVG_BY_STATE = {
+  idle:      frontSrc,
+  listening: frontSrc,   // 用户打字时仍用正脸（侧脸太"沉思"，正脸是"在看你"）
+  thinking:  sideSrc,    // 侧脸 + 泡泡 overlay
+}
+
+const SVG_RATIO = 1640 / 2554   // ≈ 0.642
+
+export default function StoatHalf({ view = 'full', state = 'idle', width = 220 }) {
+  const src = SVG_BY_STATE[state] || frontSrc
+  const fullHeight = width / SVG_RATIO
   const containerHeight = view === 'half' ? fullHeight * 0.5 : fullHeight
 
-  // listening 不做摇晃（出戏）；Step 3 整体状态机时换成 歪头03.svg 作为静态姿态
+  // listening 不做摇晃；thinking 用紧一点的呼吸
   const animation =
-    state === 'thinking'  ? 'stoat-breath 1.6s ease-in-out infinite' :   // 紧张点的呼吸
+    state === 'thinking'  ? 'stoat-breath 1.6s ease-in-out infinite' :
                             'stoat-breath 4s ease-in-out infinite'
 
   return (
@@ -36,20 +50,17 @@ export default function StoatHalf({ view = 'half', state = 'idle', width = 120 }
             0%,100% { transform: scale(1); }
             50%     { transform: scale(1.015); }
           }
-          @keyframes stoat-tilt {
-            0%,100% { transform: rotate(-1.5deg); }
-            50%     { transform: rotate(1.5deg); }
-          }
         `}</style>
         <img
-          src={stoatSrc}
+          src={src}
           alt="小白"
           style={{
             width: '100%',
             height: 'auto',
             display: 'block',
             animation,
-            transformOrigin: view === 'half' ? '50% 100%' : '50% 100%',
+            transformOrigin: '50% 100%',
+            transition: 'opacity 200ms ease-out',
           }}
         />
       </div>

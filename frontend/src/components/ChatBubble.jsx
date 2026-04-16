@@ -3,7 +3,7 @@
  * AI 侧消息可附带"记录/再聊聊"按钮（pendingTaskRec 时由 ChatPage 控制是否传入）。
  */
 
-import stoatSrc from '../assets/stoat-standing.svg'
+import stoatSrc from '../assets/stoat-front.svg'
 
 export default function ChatBubble({ message, taskRec, onRecord, onDismiss }) {
   const isUser = message.role === 'user'

@@ -293,10 +293,18 @@
 
 ### 第 2 步：页面 2 聊天室
 
-- 接入现有 FastAPI 聊天 API
-- 白鼬 SVG 完整形象 + 雪地背景 + 气泡对话（双 mode 切换）
-- AI 任务识别 → "记录/再聊聊" 按钮 → 写入页面 1
-- **聊天页 ⚙️ 设置入口**（人格/性格/命名/手记/记忆/API key 占位禁用）
+#### 2a 已完成（commit `b76017e`）
+- ✅ ChatContext + chatApi（小克2）—— send/record/dismissRec/resetSession + localStorage 跨刷新
+- ✅ ChatPage 漫画气泡布局（白鼬永远居中超大 / 顶气泡小白带泡尾 / 底气泡用户右对齐堆叠 + opacity 渐弱 / 任务推荐按钮独立行 / 历史视图 📃 切到传统列表 / thinking 时藏旧气泡突出 3 点泡泡）
+- ✅ 接入 FastAPI 聊天 API（/api/chat → reply + signal + task_recommendation 全链路通）
+- ✅ 第一版 SVG（站立全身01 + 歪头03）已替换为更精修版（1歪头 / 2-3 思考侧脸正脸 / 4 思考侧脸半身）
+
+#### 2 剩余待办
+- ⏳ **手机端拉窄实测** —— Sephy 还没在真手机/devtools 模拟器上看，确认气泡/白鼬/堆叠在 iPhone 12 Pro 宽度（390px）下不挤不溢
+- ⏳ **聊天记任务 → 任务页同步** —— ChatContext.record() 调 /api/task/record 写库成功，但 TasksPage 不知道这事，得切 tab 重新 fetch 才看到新任务。需要 TasksContext（由小克2）或 ChatContext 在 record 后广播，让 TasksPage 即刻刷新
+- ⏳ **聊天页 ⚙️ 设置面板**（**人格选择 / 自粘贴性格 / 小白命名 / 用户手记 / AI 自动记忆查看清空 / API key 占位禁用**）—— 当前 ⚙️ 只 alert 占位
+- ⏳ **prompt 减少八百个问题**（设置面板做完后一起做：默认禁问 + INFP/INTP persona 块微调）
+- ⏳ **state machine 接入新 SVG** —— 当前只用 stoat-standing；listening 时该换 1歪头，thinking 时换 2/4 思考侧脸（半身/全身按场景）。Step 3 整体状态机时统一接
 
 **完成标志：** 聊天推任务 → 页面 1 看到 → 开始专注，全链路闭环
 
