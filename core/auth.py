@@ -60,7 +60,7 @@ def get_current_user_id(authorization: str = Header(None)) -> str:
         payload = jwt.decode(
             token,
             signing_key,
-            algorithms=["ES256", "RS256", "HS256"],   # 兼容新 ECC、可能的 RSA、legacy HS256
+            algorithms=["ES256", "RS256"],   # 新 ECC / 可能的 RSA。不支持 HS256（需共享密钥）
             audience=config.SUPABASE_JWT_AUDIENCE,
         )
     except jwt.ExpiredSignatureError:

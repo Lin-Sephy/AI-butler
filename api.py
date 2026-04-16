@@ -34,9 +34,8 @@ from core.task_manager import (
     create_task, pause_task, resume_task, complete_task, abandon_task,
     get_active_task, update_task_minutes, get_today_tasks, delete_task,
     create_recurring_task, get_recurring_tasks, delete_recurring_task,
-    spawn_daily_tasks, start_idle_task,
+    spawn_daily_tasks, start_task as tm_start_task,
     create_scheduled_task, get_scheduled_tasks, get_due_scheduled_tasks,
-    start_scheduled_task,
 )
 
 # ---------- App 初始化 ----------
@@ -254,25 +253,21 @@ def record_task(req: RecordTaskRequest, user_id: str = Depends(get_current_user_
         auto_start=False,
         detail=req.detail,
     )
-    save_action_log(user_id, energy=energy_level, intent="", strategy="",
+    save_action_log(user_id, energy=energy_level,
                     recommendation=req.task_keyword, user_action="record")
     return {"message": f"已记录「{req.task_keyword}」", "task": task}
 
 
 @app.post("/api/task/{task_id}/start")
-def start_task(task_id: int, req: TaskActionRequest | None = None,
-               user_id: str = Depends(get_current_user_id)):
+def start(task_id: int, req: TaskActionRequest | None = None,
+          user_id: str = Depends(get_current_user_id)):
     """开始一个 idle 或 scheduled 任务。"""
     energy_level = (req.energy_level if req else None) or get_current_energy(user_id)["energy_level"]
     try:
-        task = start_idle_task(user_id, task_id, energy_level)
-        return {"message": f"开始「{task['keyword']}」！", "task": task}
-    except ValueError:
-        try:
-            task = start_scheduled_task(user_id, task_id, energy_level)
-            return {"message": f"开始「{task['keyword']}」！", "task": task}
-        except ValueError:
-            raise HTTPException(400, "已有执行中的任务，请先完成或放弃")
+        task = tm_start_task(user_id, task_id, energy_level)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"message": f"开始「{task['keyword']}」！", "task": task}
 
 
 @app.post("/api/task/{task_id}/pause")
@@ -293,8 +288,7 @@ def resume(task_id: int, user_id: str = Depends(get_current_user_id)):
 def complete(task_id: int, user_id: str = Depends(get_current_user_id)):
     """完成任务。"""
     task = complete_task(user_id, task_id)
-    save_action_log(user_id, energy=0, intent="", strategy="",
-                    recommendation=task.get("keyword", ""), user_action="complete")
+    save_action_log(user_id, recommendation=task.get("keyword", ""), user_action="complete")
     return {"message": f"「{task.get('keyword', '')}」完成了！", "task": task}
 
 
@@ -302,8 +296,7 @@ def complete(task_id: int, user_id: str = Depends(get_current_user_id)):
 def abandon(task_id: int, user_id: str = Depends(get_current_user_id)):
     """放弃任务。"""
     task = abandon_task(user_id, task_id)
-    save_action_log(user_id, energy=0, intent="", strategy="",
-                    recommendation=task.get("keyword", ""), user_action="abandon")
+    save_action_log(user_id, recommendation=task.get("keyword", ""), user_action="abandon")
     return {"message": f"「{task.get('keyword', '')}」已放弃", "task": task}
 
 

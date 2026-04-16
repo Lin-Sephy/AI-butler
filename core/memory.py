@@ -20,6 +20,7 @@ import config
 from db.database import (
     get_ai_memo, save_ai_memo,
     get_daily_memo, save_daily_memo, now_cn,
+    get_companion_name,
 )
 
 # ---- 印象系统参数 ----
@@ -117,6 +118,21 @@ def get_impressions_display(user_id: str) -> str:
     return "\n".join(parts)
 
 
+def _maybe_promote(imp: dict, now_str: str, via: str = "") -> bool:
+    """Draft 印象达到阈值（count≥3 且 跨≥2 天）则升级为 confirmed。返回是否升级。"""
+    if imp.get("level") != "draft":
+        return False
+    count = imp.get("count", 1)
+    days = len(imp.get("trigger_days", []))
+    if count < CONFIRM_THRESHOLD or days < CONFIRM_MIN_DAYS:
+        return False
+    imp["level"] = "confirmed"
+    imp["promoted_at"] = now_str
+    suffix = f"（{via}）" if via else ""
+    logging.info(f"[Memory] 印象升级为 confirmed{suffix}: {imp['content']}")
+    return True
+
+
 def _format_existing_impressions(impressions: list[dict]) -> str:
     """格式化已有印象列表传给提取 prompt。纯计算，不接 DB。"""
     if not impressions:
@@ -140,8 +156,6 @@ def extract_and_update(user_id: str, chat_history: list, previous_summary: str =
 
     impressions = _get_impressions(user_id)
 
-    # 读跟宠名字用于格式化对话历史
-    from db.database import get_companion_name
     try:
         companion_name = get_companion_name(user_id)
     except Exception:
@@ -235,14 +249,8 @@ def extract_and_update(user_id: str, chat_history: list, previous_summary: str =
 
     # 检查升级条件
     for imp in impressions:
-        if imp.get("level") == "draft":
-            count = imp.get("count", 1)
-            days = len(imp.get("trigger_days", []))
-            if count >= CONFIRM_THRESHOLD and days >= CONFIRM_MIN_DAYS:
-                imp["level"] = "confirmed"
-                imp["promoted_at"] = now_str
-                logging.info(f"[Memory] 印象升级为 confirmed: {imp['content']}")
-                updated = True
+        if _maybe_promote(imp, now_str):
+            updated = True
 
     # 衰减/过期
     impressions = _apply_decay(impressions, now)
@@ -392,13 +400,7 @@ def bump_on_mention(user_id: str, user_input: str) -> None:
 
     # 检查升级
     for imp in impressions:
-        if imp.get("level") == "draft":
-            count = imp.get("count", 1)
-            days = len(imp.get("trigger_days", []))
-            if count >= CONFIRM_THRESHOLD and days >= CONFIRM_MIN_DAYS:
-                imp["level"] = "confirmed"
-                imp["promoted_at"] = now_str
-                logging.info(f"[Memory] 印象通过关键词匹配升级: {imp['content']}")
+        _maybe_promote(imp, now_str, via="关键词匹配")
 
     _save_impressions(user_id, impressions)
     logging.info("[Memory] 关键词命中，已更新印象计数")

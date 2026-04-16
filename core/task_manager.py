@@ -34,7 +34,7 @@ def create_task(user_id: str, keyword: str, combo: str, energy_level: int,
     now = now_cn().isoformat()
     started_at = now if auto_start else None
 
-    row = _post("task", {
+    return _post("task", {
         "user_id": user_id,
         "keyword": keyword,
         "combo": combo,
@@ -46,12 +46,6 @@ def create_task(user_id: str, keyword: str, combo: str, energy_level: int,
         "created_at": now,
         "detail": detail,
     })
-
-    return row or {
-        "keyword": keyword, "combo": combo, "energy_at_start": energy_level,
-        "status": status, "default_minutes": suggested_minutes,
-        "task_type": task_type, "started_at": started_at, "detail": detail,
-    }
 
 
 def pause_task(user_id: str, task_id: int) -> dict:
@@ -151,14 +145,12 @@ def get_active_task(user_id: str) -> dict | None:
 def create_recurring_task(user_id: str, keyword: str, task_type: str = "work",
                           default_minutes: int | None = None) -> dict:
     """创建一个每日循环任务模板。"""
-    row = _post("recurring_task", {
+    return _post("recurring_task", {
         "user_id": user_id,
         "keyword": keyword,
         "task_type": task_type,
         "default_minutes": default_minutes,
     })
-    return row or {"keyword": keyword, "task_type": task_type,
-                   "default_minutes": default_minutes, "active": 1}
 
 
 def get_recurring_tasks(user_id: str) -> list[dict]:
@@ -214,17 +206,26 @@ def spawn_daily_tasks(user_id: str) -> None:
             }, return_row=False)
 
 
-def start_idle_task(user_id: str, task_id: int, energy_level: int) -> dict:
-    """启动一个 idle 状态的任务。"""
+def start_task(user_id: str, task_id: int, energy_level: int,
+               allowed_from: tuple = ("idle", "scheduled")) -> dict:
+    """启动一个任务：idle / scheduled → executing。
+
+    任务不存在 / 状态不在 allowed_from / 已有执行中任务 → ValueError。
+    """
     executing = get_executing_task(user_id)
     if executing:
         raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
+
+    task = _get_task_by_id(user_id, task_id)
+    if not task:
+        raise ValueError("任务不存在")
+    if task["status"] not in allowed_from:
+        raise ValueError(f"任务状态为 {task['status']}，无法启动")
 
     now = now_cn().isoformat()
     _patch("task", {
         "id": f"eq.{task_id}",
         "user_id": f"eq.{user_id}",
-        "status": "eq.idle",
     }, {"status": "executing", "energy_at_start": energy_level, "started_at": now},
        return_row=False)
     return _get_task_by_id(user_id, task_id)
@@ -236,7 +237,7 @@ def create_scheduled_task(user_id: str, keyword: str, scheduled_at: str, combo: 
                           task_type: str = "work") -> dict:
     """创建一个预定任务。"""
     now = now_cn().isoformat()
-    row = _post("task", {
+    return _post("task", {
         "user_id": user_id,
         "keyword": keyword,
         "combo": combo,
@@ -247,11 +248,6 @@ def create_scheduled_task(user_id: str, keyword: str, scheduled_at: str, combo: 
         "scheduled_at": scheduled_at,
         "created_at": now,
     })
-    return row or {
-        "keyword": keyword, "combo": combo, "status": "scheduled",
-        "default_minutes": suggested_minutes, "task_type": task_type,
-        "scheduled_at": scheduled_at,
-    }
 
 
 def get_scheduled_tasks(user_id: str) -> list[dict]:
@@ -273,22 +269,6 @@ def get_due_scheduled_tasks(user_id: str) -> list[dict]:
         "scheduled_at": f"lte.{now}",
         "select": "*",
     })
-
-
-def start_scheduled_task(user_id: str, task_id: int, energy_level: int) -> dict:
-    """启动一个预定任务：scheduled → executing。"""
-    executing = get_executing_task(user_id)
-    if executing:
-        raise ValueError("已有执行中的任务，请先暂停、完成或放弃当前任务")
-
-    now = now_cn().isoformat()
-    _patch("task", {
-        "id": f"eq.{task_id}",
-        "user_id": f"eq.{user_id}",
-        "status": "eq.scheduled",
-    }, {"status": "executing", "energy_at_start": energy_level, "started_at": now},
-       return_row=False)
-    return _get_task_by_id(user_id, task_id)
 
 
 def delete_task(user_id: str, task_id: int) -> None:

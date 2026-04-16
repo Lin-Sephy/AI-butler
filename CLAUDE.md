@@ -112,7 +112,8 @@ ai-butler/
 ├── anchor_db/              # ANCHOR 数据
 ├── docs/                   # 产品文档 + 决定归档 + 对话记录 + 白鼬素材
 └── tests/
-    └── test_rules_engine.py
+    ├── test_rules_engine.py      # should_trigger_task / validate_reply / check_energy_drift 等
+    └── test_memory.py            # _maybe_promote / _apply_decay / _extract_keywords
 ```
 
 ## 核心架构：聊天归 AI，推任务归 Python（v4）

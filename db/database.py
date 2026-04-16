@@ -80,78 +80,67 @@ def init_db():
 # ════════════════════════════════════════════════════════════
 
 
-# ---- user_memo CRUD ----
+def _get_profile_field(user_id: str, field: str, default: str = "") -> str:
+    """读 user_profile 表的单个字段，无行或空值返回 default。"""
+    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": field})
+    if rows and rows[0].get(field):
+        return rows[0][field]
+    return default
+
+
+def _set_profile_field(user_id: str, field: str, value: str) -> None:
+    """写 user_profile 表的单个字段。"""
+    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {field: value}, return_row=False)
+
+
+# ---- user_memo / ai_memo / daily_memo CRUD ----
 
 def get_user_memo(user_id: str) -> str:
-    """获取用户手记内容。"""
-    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "user_memo"})
-    if rows and rows[0].get("user_memo"):
-        return rows[0]["user_memo"]
-    return ""
+    return _get_profile_field(user_id, "user_memo")
 
 
 def save_user_memo(user_id: str, memo: str) -> None:
-    """保存用户手记内容。"""
-    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"user_memo": memo}, return_row=False)
+    _set_profile_field(user_id, "user_memo", memo)
 
 
 def get_ai_memo(user_id: str) -> str:
-    """获取 AI 自动记忆内容。"""
-    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "ai_memo"})
-    if rows and rows[0].get("ai_memo"):
-        return rows[0]["ai_memo"]
-    return ""
+    return _get_profile_field(user_id, "ai_memo")
 
 
 def save_ai_memo(user_id: str, memo: str) -> None:
-    """保存 AI 自动记忆内容。"""
-    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"ai_memo": memo}, return_row=False)
+    _set_profile_field(user_id, "ai_memo", memo)
 
 
 def clear_ai_memo(user_id: str) -> None:
-    """清空 AI 自动记忆。"""
-    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"ai_memo": ""}, return_row=False)
+    _set_profile_field(user_id, "ai_memo", "")
 
 
 def get_daily_memo(user_id: str) -> str:
-    """获取每日记忆 JSON 字符串。"""
-    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "daily_memo"})
-    if rows and rows[0].get("daily_memo"):
-        return rows[0]["daily_memo"]
-    return "{}"
+    """每日记忆 JSON 字符串，默认 '{}'。"""
+    return _get_profile_field(user_id, "daily_memo", "{}")
 
 
 def save_daily_memo(user_id: str, memo: str) -> None:
-    """保存每日记忆 JSON 字符串。"""
-    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"daily_memo": memo}, return_row=False)
+    _set_profile_field(user_id, "daily_memo", memo)
 
 
 # ---- 跟宠名字 + 自定义人格 CRUD ----
 
 def get_companion_name(user_id: str) -> str:
-    """获取跟宠名字，默认 '小白'。"""
-    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "companion_name"})
-    if rows and rows[0].get("companion_name"):
-        return rows[0]["companion_name"]
-    return "小白"
+    return _get_profile_field(user_id, "companion_name", "小白")
 
 
 def save_companion_name(user_id: str, name: str) -> None:
-    """保存跟宠名字。"""
-    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"companion_name": name}, return_row=False)
+    _set_profile_field(user_id, "companion_name", name)
 
 
 def get_custom_persona(user_id: str) -> str:
-    """获取自定义人格描述，空字符串表示使用 MBTI 预设。"""
-    rows = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "custom_persona"})
-    if rows and rows[0].get("custom_persona"):
-        return rows[0]["custom_persona"]
-    return ""
+    """自定义人格描述，空字符串表示用 MBTI 预设。"""
+    return _get_profile_field(user_id, "custom_persona")
 
 
 def save_custom_persona(user_id: str, persona: str) -> None:
-    """保存自定义人格描述。"""
-    _patch("user_profile", {"user_id": f"eq.{user_id}"}, {"custom_persona": persona}, return_row=False)
+    _set_profile_field(user_id, "custom_persona", persona)
 
 
 def get_companion_profile(user_id: str) -> dict:
@@ -254,9 +243,14 @@ def get_avg_energy_7d(user_id: str) -> float | None:
 
 # ---- action_log CRUD ----
 
-def save_action_log(user_id: str, energy: int, intent: str, strategy: str,
-                    recommendation: str, user_action: str) -> None:
-    """记录用户对推荐的反馈。"""
+def save_action_log(user_id: str, recommendation: str, user_action: str,
+                    energy: int | None = None,
+                    intent: str = "", strategy: str = "") -> None:
+    """记录用户对推荐的反馈。
+
+    energy 为 None 表示"此刻精力未知"（写 NULL 到 DB），
+    intent / strategy 是 MVP 遗产字段，默认空串。
+    """
     _post("action_log", {
         "user_id": user_id,
         "energy_at_action": energy,
