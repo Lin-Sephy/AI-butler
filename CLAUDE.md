@@ -217,7 +217,7 @@ ai-butler/
 
 ## 开发进度
 
-Streamlit MVP 阶段（第 0 步到 v4.2.1，2026-03 到 2026-04-05）已全部完成并部署到 Streamlit Cloud。当前进入 Web App 迁移阶段（`webapp-migration` 分支），后端 FastAPI + Supabase 已跑通，前端 v2 待做。Web App 迁移的当前产品方向与进度见 memory 里 `project_progress.md`。
+Streamlit MVP 阶段（第 0 步到 v4.2.1，2026-03 到 2026-04-05）已全部完成并部署到 Streamlit Cloud。当前进入 Web App 迁移阶段（`webapp-migration` 分支）。当前产品方向与实时进度见 memory 里 `project_progress.md`。
 
 > 完整的 MVP 开发顺序表、上线后迭代方向、测试中发现的已知问题、v4.2.1 回退细节、v4.2 分层架构细节见 `docs/changelog-history.md`
 
@@ -259,20 +259,3 @@ Streamlit MVP 阶段（第 0 步到 v4.2.1，2026-03 到 2026-04-05）已全部�
 ## 降级容错原则
 
 如果 DeepSeek API 调用失败，系统必须能用兜底模板回复，页面绝不崩溃。兜底模板按精力档位提供安全回复。
-
-## 测试策略（2026-04-16 建立）
-
-两层结构：
-
-- **L1 纯逻辑单测**（`tests/`，pytest）— 覆盖 `core/rules_engine.py` / `core/memory.py` 纯函数 / `core/energy.py` 计算。改这三类文件时顺手加 case，3-5 min/条。
-- **L2 集成 smoke 脚本**（未来放 `scripts/smoke.py`，暂未建）— DB / API 签名 / auth 改动前跑一圈"登录→建任务→操作→聊天"闭环。
-
-**运行**：`python -m pytest tests/ -v`（需先 `pip install -r requirements-dev.txt`）
-
-**不写**：
-- 全覆盖单测（ROI 负）
-- LLM 调用 mock 测（模型漂移假阳性高）
-- 前端单测（UI 还在飘）
-- 端到端测塞进 pytest（那是 L2 smoke 的活）
-
-前端靠手动走查 + 视觉验证；后端集成回归靠 L2 smoke（等建）。

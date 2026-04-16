@@ -268,22 +268,28 @@
 
 ## 开发顺序
 
-### 第 0 步：视觉 HTML 原型 + 多用户改造
+### 第 0 步：视觉 HTML 原型 + 多用户改造 ✅ 完成（2026-04-15）
 
 - ✅ **prototype.html + design tokens 定稿** —— v1 淡蓝紫雪地，落地到 `frontend/src/design-tokens.css`，备份在 `docs/references/白鼬/tokens_候选v1_淡蓝紫雪地_选中.json`
 - ✅ **后端改造完成** —— Supabase 新项目 `ieakiihfsaqqyyjdyjtt` 跑过 `db/migration_v2.sql`（6 表带 user_id + RLS + handle_new_user trigger）；`db/database.py` / `core/task_manager.py` / `core/memory.py` / `core/energy.py` / `api.py` 全部 user_id 化；新建 `core/auth.py` 用 PyJWT 验 Supabase ES256 JWT
-- ⏳ **前端骨架待做** —— React + Vite + Supabase SDK + Auth Context + 4-tab 占位
+- ✅ **前端骨架完成** —— React + Vite + `@supabase/supabase-js`，AuthContext 自动匿名登录，apiFetch 封装 JWT header，4 tab 占位 App
+- ✅ **Render 部署后端** —— `https://ai-butler-1sp8.onrender.com`（Singapore，free tier）
+- ✅ **端到端联通验证通过** —— 浏览器→匿名登录→JWT→Render→JWKS 验签→user_id→Supabase REST→`{"tasks":[]}` 返回
 
-**完成标志：** design tokens 定稿 ✅ + 后端在多用户隔离下能正常响应（待前端骨架完成后端到端验证）
+### 第 0.5 步：代码瘦身 + 单测基建 ✅ 完成（2026-04-16）
 
-### 第 1 步：页面 1 + 专注遮罩（骨架）
+- ✅ **后端 simplify**（commit `df04880`）—— `db/database.py` 抽 `_get_profile_field/_set_profile_field` helper；`task_manager` 合并 `start_idle_task/start_scheduled_task` → `start_task(allowed_from=...)`；`memory` 抽 `_maybe_promote`；`auth.py` 删 HS256；清死代码
+- ✅ **L1 纯逻辑单测** —— `tests/test_rules_engine.py` + `tests/test_memory.py`（pytest）；L1/L2 边界与"不写清单"写入 memory `feedback_testing_strategy.md`
 
-- **四页 Tab 布局** + 底部导航
-- 任务面板 CRUD（手动新建/完成/删除）
-- 点任务 → 全屏专注遮罩（计时器 + 白噪音）
-- 桌宠小白占位（先用静态 SVG，行为后做）
+### 第 1 步：页面 1 + 专注遮罩 ✅ 完成（2026-04-16，commit `300f0e1`）
 
-**完成标志：** 打开 → 加任务 → 开始专注 → 结束，闭环跑通
+- ✅ **TasksPage** —— 列任务（执行中→暂停→待完成排序）+ 已完成折叠 + 空状态文案
+- ✅ **TaskCard** —— 5 状态视觉（dot/chip/操作按钮按状态分发）+ executing 左 3px 蓝边强调
+- ✅ **NewTaskModal** —— 关键词 + 时长快选 [25/35/45/60/90/120] + 自填 + work/rest
+- ✅ **FocusOverlay** —— 倒计时/正计时 + 暂停/完成/放弃 + 雪地针叶背景 + 白噪音/桌宠占位
+- ✅ **视觉细调** —— 砍掉浮动 FAB 改 inline "+ 新建任务" 按钮长在列表末尾；placeholder 改 "给自己安排点什么"；全局去 italic（feedback memory 钉死）
+
+**完成标志达成：** 打开 → 加任务 → 开始专注 → 结束，闭环跑通 ✅
 
 ### 第 2 步：页面 2 聊天室
 
