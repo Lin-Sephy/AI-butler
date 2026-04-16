@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import { useAuth } from './contexts/AuthContext.jsx'
 import TasksPage from './pages/TasksPage.jsx'
+import ChatPage from './pages/ChatPage.jsx'
 
 const TABS = [
   { key: 'tasks',  label: '任务' },
@@ -42,7 +43,7 @@ export default function App() {
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <main style={{ flex: 1, padding: '40px 24px', maxWidth: 720, margin: '0 auto', width: '100%' }}>
         {tab === 'tasks' && <TasksPage />}
-        {tab === 'chat'  && <Placeholder title="聊天" />}
+        {tab === 'chat'  && <ChatPage />}
         {tab === 'stats' && <Placeholder title="数据" />}
         {tab === 'me'    && <Placeholder title="我的" />}
       </main>
