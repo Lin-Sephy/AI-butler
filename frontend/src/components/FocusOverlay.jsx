@@ -1,0 +1,142 @@
+import { useState, useEffect, useRef } from 'react'
+
+export default function FocusOverlay({ task, onComplete, onAbandon }) {
+  const [elapsed, setElapsed] = useState(0) // 秒
+  const [paused, setPaused] = useState(false)
+  const intervalRef = useRef(null)
+
+  const totalSeconds = (task.default_minutes || 25) * 60
+  const isCountdown = !!task.default_minutes
+  const remaining = Math.max(0, totalSeconds - elapsed)
+
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      if (!paused) setElapsed(s => s + 1)
+    }, 1000)
+    return () => clearInterval(intervalRef.current)
+  }, [paused])
+
+  // 倒计时归零自动完成
+  useEffect(() => {
+    if (isCountdown && remaining <= 0) {
+      onComplete(task.id)
+    }
+  }, [remaining, isCountdown])
+
+  // tab 可见性：隐藏时暂停动画（不暂停计时——专注时间要真实）
+  useEffect(() => {
+    function handleVisibility() {
+      // 不暂停计时器——用户切走了不代表停止专注
+      // 桌宠可以在这里做反应（第 3 步）
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [])
+
+  const displaySeconds = isCountdown ? remaining : elapsed
+  const mm = String(Math.floor(displaySeconds / 60)).padStart(2, '0')
+  const ss = String(displaySeconds % 60).padStart(2, '0')
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'var(--color-base)',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      padding: 40,
+    }}>
+      {/* 针叶暗纹背景层（复用 design tokens） */}
+      <div style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none',
+        opacity: 0.06,
+        backgroundRepeat: 'repeat',
+        backgroundSize: '360px 240px',
+        backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='240' viewBox='0 0 360 240'><g fill='%234896c4' opacity='0.45'><path d='M40 200 L30 160 L50 160 Z M35 170 L25 130 L45 130 Z M37 140 L28 100 L46 100 Z'/><path d='M140 210 L128 170 L152 170 Z M134 180 L124 140 L144 140 Z'/><path d='M260 200 L248 160 L272 160 Z M254 170 L244 130 L264 130 Z M256 140 L247 100 L265 100 Z M258 110 L250 80 L266 80 Z'/><path d='M340 205 L330 170 L350 170 Z M335 180 L325 145 L345 145 Z'/></g></svg>")`,
+      }} />
+
+      {/* 计时器 */}
+      <div style={{
+        fontSize: 96,
+        fontWeight: 300,
+        fontVariantNumeric: 'tabular-nums',
+        letterSpacing: '-0.02em',
+        color: 'var(--color-text)',
+        lineHeight: 1,
+        marginBottom: 16,
+        fontFeatureSettings: '"ss01"',
+      }}>
+        {mm}:{ss}
+      </div>
+
+      {/* 任务标签 */}
+      <div style={{
+        fontSize: 15,
+        color: 'var(--color-subtle)',
+        marginBottom: 48,
+      }}>
+        {isCountdown ? 'focus' : 'open'} · {task.keyword}
+      </div>
+
+      {/* 控制按钮 */}
+      <div style={{ display: 'flex', gap: 16 }}>
+        <button
+          onClick={() => setPaused(!paused)}
+          style={{
+            padding: '12px 28px', borderRadius: 'var(--radius)',
+            border: '1px solid var(--color-line)',
+            background: 'var(--color-surface)',
+            color: 'var(--color-text)',
+            fontSize: 15, fontFamily: 'inherit', cursor: 'pointer',
+          }}
+        >
+          {paused ? '继续' : '暂停'}
+        </button>
+        <button
+          onClick={() => onComplete(task.id)}
+          style={{
+            padding: '12px 28px', borderRadius: 'var(--radius)',
+            border: '1px solid var(--color-primary)',
+            background: 'var(--color-primary)',
+            color: '#fff',
+            fontSize: 15, fontFamily: 'inherit', cursor: 'pointer',
+          }}
+        >
+          完成
+        </button>
+        <button
+          onClick={() => onAbandon(task.id)}
+          style={{
+            padding: '12px 28px', borderRadius: 'var(--radius)',
+            border: '1px solid var(--color-line)',
+            background: 'transparent',
+            color: 'var(--color-subtle)',
+            fontSize: 15, fontFamily: 'inherit', cursor: 'pointer',
+          }}
+        >
+          放弃
+        </button>
+      </div>
+
+      {/* 白噪音占位（Sephy 后续找音源） */}
+      <div style={{
+        position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', gap: 12, alignItems: 'center',
+        color: 'var(--color-subtle)', fontSize: 13,
+      }}>
+        <span style={{ opacity: 0.5 }}>🎧 白噪音（待接入）</span>
+      </div>
+
+      {/* 桌宠占位（第 3 步做真 SVG 白鼬） */}
+      <div style={{
+        position: 'absolute', bottom: 40, right: 40,
+        width: 60, height: 60, borderRadius: '50%',
+        background: 'var(--color-accent-soft)',
+        border: '1px solid var(--color-accent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 24,
+      }}>
+        🦦
+      </div>
+    </div>
+  )
+}

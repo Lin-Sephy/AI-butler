@@ -29,9 +29,5 @@ docs/portfolio/
 anchor_db/
 anchor_memory_lib/
 
-# 调试临时截图（根目录）
-/blackscreen.png
-/book-room-v0.1-self-check.png
-/v0.2-preview.png
-/v0.3-bob.png
-/prototype-*.png
+# 调试临时截图（根目录）—— Playwright/手工调试出来的 PNG 不进库
+/*.png

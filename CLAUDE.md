@@ -259,3 +259,20 @@ Streamlit MVP 阶段（第 0 步到 v4.2.1，2026-03 到 2026-04-05）已全部�
 ## 降级容错原则
 
 如果 DeepSeek API 调用失败，系统必须能用兜底模板回复，页面绝不崩溃。兜底模板按精力档位提供安全回复。
+
+## 测试策略（2026-04-16 建立）
+
+两层结构：
+
+- **L1 纯逻辑单测**（`tests/`，pytest）— 覆盖 `core/rules_engine.py` / `core/memory.py` 纯函数 / `core/energy.py` 计算。改这三类文件时顺手加 case，3-5 min/条。
+- **L2 集成 smoke 脚本**（未来放 `scripts/smoke.py`，暂未建）— DB / API 签名 / auth 改动前跑一圈"登录→建任务→操作→聊天"闭环。
+
+**运行**：`python -m pytest tests/ -v`（需先 `pip install -r requirements-dev.txt`）
+
+**不写**：
+- 全覆盖单测（ROI 负）
+- LLM 调用 mock 测（模型漂移假阳性高）
+- 前端单测（UI 还在飘）
+- 端到端测塞进 pytest（那是 L2 smoke 的活）
+
+前端靠手动走查 + 视觉验证；后端集成回归靠 L2 smoke（等建）。
