@@ -16,8 +16,8 @@ export default function StoatHalf({ view = 'half', state = 'idle', width = 120 }
   const fullHeight = width / 0.755
   const containerHeight = view === 'half' ? fullHeight * 0.5 : fullHeight
 
+  // listening 不做摇晃（出戏）；Step 3 整体状态机时换成 歪头03.svg 作为静态姿态
   const animation =
-    state === 'listening' ? 'stoat-tilt 2.4s ease-in-out infinite' :
     state === 'thinking'  ? 'stoat-breath 1.6s ease-in-out infinite' :   // 紧张点的呼吸
                             'stoat-breath 4s ease-in-out infinite'
 
