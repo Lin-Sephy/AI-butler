@@ -177,9 +177,6 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
     signal = chat_result.get("signal", {})
     reply = chat_result["reply"]
 
-    # 保存 AI 回复
-    save_chat_message(user_id, req.session_id, "assistant", reply)
-
     # 精力偏差检测
     _, energy_confirm_needed = check_energy_drift(signal, energy_level)
 
@@ -213,8 +210,6 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
 
             if task_resp.get("reply"):
                 reply = task_resp["reply"]
-                # 更新数据库中的 AI 回复
-                save_chat_message(user_id, req.session_id, "assistant", reply)
 
             if should_show_action_buttons(task_resp):
                 show_buttons = True
@@ -222,6 +217,9 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
 
         except Exception as e:
             logging.error(f"任务推荐调用出错: {type(e).__name__}: {e}")
+
+    # save_chat_message 走 INSERT 不走 upsert——必须等 reply 最终定版才写，避免一条用户消息对应两条 AI 消息
+    save_chat_message(user_id, req.session_id, "assistant", reply)
 
     # 关键词匹配（零 API 成本）
     try:
