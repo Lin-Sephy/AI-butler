@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>蜷睡 SVG 归一对比</title>
+<style>
+  body { font-family: -apple-system, 'Helvetica Neue', sans-serif; background: #0f1420; color: #eee; margin: 0; padding: 32px; }
+  h1 { font-size: 22px; margin: 0 0 8px 0; text-align: center; }
+  .legend { text-align: center; color: #888; font-size: 13px; margin-bottom: 32px; line-height: 1.6; }
+  .legend strong { color: #f5b1af; font-family: monospace; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; padding: 32px; background: #1a2030; border-radius: 14px; align-items: center; }
+  .pane { text-align: center; }
+  .pane h3 { font-size: 14px; color: #aaa; margin: 0 0 16px 0; font-weight: 500; }
+  .pane h3 .tag { color: #f5b1af; margin-left: 8px; font-size: 12px; }
+  .pane .holder { background: #e6f5fa; border-radius: 10px; padding: 28px; display: flex; align-items: center; justify-content: center; min-height: 380px; }
+  .pane img { max-width: 320px; max-height: 380px; object-fit: contain; }
+</style>
+</head>
+<body>
+<h1>stoat-sleeping 颜色归一对比</h1>
+<p class="legend">
+  锚点：白 <strong>#FAFAF9</strong> · 黑 <strong>#090A0A</strong> · 粉 <strong>#F5B1AF</strong><br>
+  原文件（左）零修改 · 归一版（右）已落在 <code>frontend/src/assets/normalized/</code>
+</p>
+
+<div class="row">
+  <div class="pane">
+    <h3>stoat-sleeping（原）</h3>
+    <div class="holder"><img src="../stoat-sleeping.svg" alt="sleeping 原"></div>
+  </div>
+  <div class="pane">
+    <h3>stoat-sleeping<span class="tag">归一后</span></h3>
+    <div class="holder"><img src="./stoat-sleeping.svg" alt="sleeping 归一"></div>
+  </div>
+</div>
+
+</body>
+</html>
