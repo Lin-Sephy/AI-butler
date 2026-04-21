@@ -7,7 +7,10 @@
  *   - 任务推荐按钮：紧贴 AI 气泡下方独立一行
  *   - 想看完整对话：右上角 📃 切到历史滚动列表视图
  *
- * 数据：useChat() 提供 messages/send/record/dismissRec/resetSession/pendingTaskRec
+ * 数据：useChat() 提供 messages/send/resetSession/mode/planConfirmed
+ *
+ * v5.0 改动：砍了 v4 的推任务气泡（pendingTaskRec/record/dismissRec 链路已不存在）。
+ * 模式切换 UI（chat ↔ plan）和计划确认界面（planConfirmed 触发）由前端小克后续补。
  */
 
 import { useState, useRef, useEffect } from 'react'
@@ -19,10 +22,7 @@ const STOAT_WIDTH = 220
 const BUBBLE_MAX_LEN = 100   // 超过截断 + "更多"
 
 export default function ChatPage() {
-  const {
-    messages, loading, error,
-    pendingTaskRec, send, record, dismissRec, resetSession,
-  } = useChat()
+  const { messages, loading, error, send, resetSession } = useChat()
 
   const [view, setView] = useState('main')   // 'main' | 'history'
   const [input, setInput] = useState('')
@@ -111,16 +111,6 @@ export default function ChatPage() {
         {/* 顶气泡：小白说 —— 思考时藏掉，让头顶 3 点泡泡当唯一焦点 */}
         {!sending && latestAi && (
           <SpeechBubble who="ai" text={latestAi.content} />
-        )}
-
-        {/* 任务推荐按钮 —— 思考时也藏（按钮属于"上一条 AI 回复"，等新回复来了再说） */}
-        {!sending && pendingTaskRec && (
-          <TaskActionRow
-            keyword={pendingTaskRec.task_keyword}
-            minutes={pendingTaskRec.suggested_minutes}
-            onRecord={record}
-            onDismiss={dismissRec}
-          />
         )}
 
         {/* 白鼬居中 */}
@@ -246,7 +236,7 @@ function HistoryView({ messages, onBack, onNewSession, error }) {
             </p>
           ) : (
             messages.map((m, i) => (
-              <ChatBubble key={i} message={m} taskRec={null} />
+              <ChatBubble key={i} message={m} />
             ))
           )}
           <div ref={endRef} />
@@ -369,45 +359,6 @@ function BubbleTail({ isAi, bgColor, borderColor }) {
       borderTop: isAi ? 'none' : `1.5px solid ${borderColor}`,
       borderLeft: isAi ? 'none' : `1.5px solid ${borderColor}`,
     }} />
-  )
-}
-
-
-// ════════════ 任务推荐按钮 ════════════
-
-function TaskActionRow({ keyword, minutes, onRecord, onDismiss }) {
-  return (
-    <div style={{
-      display: 'flex', gap: 10,
-      position: 'relative', zIndex: 1,
-    }}>
-      <button
-        onClick={onRecord}
-        style={{
-          padding: '8px 18px',
-          borderRadius: 'var(--radius)',
-          border: '1px solid var(--color-primary)',
-          background: 'var(--color-primary)',
-          color: '#fff',
-          fontSize: 13, fontFamily: 'inherit', cursor: 'pointer',
-        }}
-      >
-        记下「{keyword}」{minutes ? ` ${minutes} min` : ''}
-      </button>
-      <button
-        onClick={onDismiss}
-        style={{
-          padding: '8px 18px',
-          borderRadius: 'var(--radius)',
-          border: '1px solid var(--color-line)',
-          background: 'transparent',
-          color: 'var(--color-subtle)',
-          fontSize: 13, fontFamily: 'inherit', cursor: 'pointer',
-        }}
-      >
-        再聊聊
-      </button>
-    </div>
   )
 }
 

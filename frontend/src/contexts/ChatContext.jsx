@@ -5,27 +5,27 @@
  * sessionId 落 localStorage，跨刷新也保留。
  *
  * 消费方式：
- *   const { messages, pendingTaskRec, send, record, ... } = useChat()
+ *   const { messages, mode, send, setMode, planConfirmed, ... } = useChat()
  *
  * 暴露字段：
  *   - sessionId: string | null
  *   - messages: Array<{role: 'user'|'assistant', content: string}>
  *   - loading: boolean（首次 bootstrap 是否还在进行）
  *   - error: string | null
- *   - pendingTaskRec: 上一条 AI 回复里的任务推荐对象，或 null
- *       形如 { task_keyword, suggested_minutes, task_type, reply }
- *   - energyConfirmNeeded: boolean（上一条 AI 感知精力偏差需要确认）
+ *   - mode: 'chat' | 'plan'（v5.0 新增：当前会话模式）
+ *   - planConfirmed: boolean（v5.0 新增：计划模式下 DS 判定最近一轮定稿，
+ *                             前端可据此触发 planExtract + 弹确认界面）
  *
  * 暴露方法：
- *   - send(text, opts?)                 发消息，append user + assistant
- *   - record()                          把当前 pendingTaskRec 落到任务栏，返回 { task }
- *   - dismissRec()                      "再聊聊"：清掉推荐按钮不记录
- *   - resetSession()                    清空当前会话，新建一个（顶部 ⊕ 新建对话）
+ *   - send(text)                发消息，用当前 mode
+ *   - setMode(mode)             切换闲聊/计划模式（ui 层调）
+ *   - clearPlanConfirmed()      用户消费完 confirmed 信号后清掉（防重复触发）
+ *   - resetSession()            清空当前会话，新建一个（顶部 ⊕ 新建对话）
  */
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from './AuthContext.jsx'
-import { newSession, loadHistory, sendMessage, recordTask } from '../lib/chatApi.js'
+import { newSession, loadHistory, sendMessage } from '../lib/chatApi.js'
 
 const SESSION_KEY = 'ai-butler-session-id'
 
@@ -38,8 +38,8 @@ export function ChatProvider({ children }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [pendingTaskRec, setPendingTaskRec] = useState(null)
-  const [energyConfirmNeeded, setEnergyConfirmNeeded] = useState(false)
+  const [mode, setMode] = useState('chat')
+  const [planConfirmed, setPlanConfirmed] = useState(false)
 
   const bootstrapped = useRef(false)
 
@@ -73,51 +73,25 @@ export function ChatProvider({ children }) {
 
   // ── send：发消息 ──
   const send = useCallback(
-    async (text, { persona = 'infp' } = {}) => {
+    async text => {
       if (!sessionId || !text.trim()) return
       setError(null)
       // 本地乐观 append 用户消息
       setMessages(m => [...m, { role: 'user', content: text }])
       try {
-        const resp = await sendMessage({ message: text, sessionId, persona })
+        const resp = await sendMessage({ message: text, sessionId, mode })
         setMessages(m => [...m, { role: 'assistant', content: resp.reply }])
-        setPendingTaskRec(
-          resp.show_action_buttons && resp.task_recommendation ? resp.task_recommendation : null,
-        )
-        setEnergyConfirmNeeded(!!resp.energy_confirm_needed)
+        if (resp.confirmed) setPlanConfirmed(true)
       } catch (e) {
         setError(e.message)
       }
     },
-    [sessionId],
+    [sessionId, mode],
   )
 
-  // ── record：把推荐落到任务栏 ──
-  const record = useCallback(async () => {
-    if (!pendingTaskRec) return null
-    const keyword = pendingTaskRec.task_keyword
-    try {
-      const resp = await recordTask({
-        keyword,
-        suggestedMinutes: pendingTaskRec.suggested_minutes,
-        taskType: pendingTaskRec.task_type || 'work',
-      })
-      setPendingTaskRec(null)
-      // 用一条 AI 侧系统提示消息 "记住了"
-      setMessages(m => [
-        ...m,
-        { role: 'assistant', content: `已记录「${keyword}」～`, _meta: 'task_recorded' },
-      ])
-      return resp
-    } catch (e) {
-      setError(e.message)
-      return null
-    }
-  }, [pendingTaskRec])
-
-  // ── dismissRec："再聊聊" ──
-  const dismissRec = useCallback(() => {
-    setPendingTaskRec(null)
+  // ── clearPlanConfirmed：confirmed 信号被消费后清掉，防重复触发 extract ──
+  const clearPlanConfirmed = useCallback(() => {
+    setPlanConfirmed(false)
   }, [])
 
   // ── resetSession：顶部 ⊕ 新建对话 ──
@@ -128,8 +102,7 @@ export function ChatProvider({ children }) {
       localStorage.setItem(SESSION_KEY, session_id)
       setSessionId(session_id)
       setMessages(greeting ? [{ role: 'assistant', content: greeting }] : [])
-      setPendingTaskRec(null)
-      setEnergyConfirmNeeded(false)
+      setPlanConfirmed(false)
     } catch (e) {
       setError(e.message)
     }
@@ -140,11 +113,11 @@ export function ChatProvider({ children }) {
     messages,
     loading,
     error,
-    pendingTaskRec,
-    energyConfirmNeeded,
+    mode,
+    planConfirmed,
     send,
-    record,
-    dismissRec,
+    setMode,
+    clearPlanConfirmed,
     resetSession,
   }
 

@@ -1,11 +1,11 @@
 /**
  * 聊天气泡组件。用户侧右对齐，小白侧左对齐 + 头像。
- * AI 侧消息可附带"记录/再聊聊"按钮（pendingTaskRec 时由 ChatPage 控制是否传入）。
+ * 历史视图下 ChatPage 的 HistoryView 使用。
  */
 
 import stoatSrc from '../assets/stoat-front.svg'
 
-export default function ChatBubble({ message, taskRec, onRecord, onDismiss }) {
+export default function ChatBubble({ message }) {
   const isUser = message.role === 'user'
 
   return (
@@ -34,42 +34,6 @@ export default function ChatBubble({ message, taskRec, onRecord, onDismiss }) {
         }}>
           {message.content}
         </div>
-
-        {/* 内联"记录/再聊聊"按钮——仅 AI 侧 + 有 taskRec 时 */}
-        {!isUser && taskRec && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingLeft: 4 }}>
-            <button
-              onClick={onRecord}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 'var(--radius)',
-                border: '1px solid var(--color-primary)',
-                background: 'var(--color-primary)',
-                color: '#fff',
-                fontSize: 13,
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-              }}
-            >
-              记录「{taskRec.task_keyword}」
-            </button>
-            <button
-              onClick={onDismiss}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 'var(--radius)',
-                border: '1px solid var(--color-line)',
-                background: 'transparent',
-                color: 'var(--color-subtle)',
-                fontSize: 13,
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-              }}
-            >
-              再聊聊
-            </button>
-          </div>
-        )}
       </div>
     </div>
   )
