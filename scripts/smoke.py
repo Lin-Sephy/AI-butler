@@ -112,7 +112,6 @@ def main() -> None:
         json={
             "message": "你好，今天想写一会儿论文",
             "session_id": session_id,
-            "persona": "infp",
         },
     )
     if r.status_code != 200:
@@ -121,8 +120,7 @@ def main() -> None:
     reply = chat.get("reply", "")
     if not reply:
         fail(f"chat 返回没有 reply：{chat}")
-    sig = chat.get("signal", {})
-    ok(f"AI 回复 {len(reply)} 字（signal.activity_category={sig.get('activity_category')}, user_attitude={sig.get('user_attitude')}）")
+    ok(f"AI 回复 {len(reply)} 字（confirmed={chat.get('confirmed', False)}）")
 
     # ─── Step 5: 记录任务 ───
     step(5, "POST /api/task/record")

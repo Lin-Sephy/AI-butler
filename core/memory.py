@@ -21,6 +21,7 @@ from db.database import (
     get_ai_memo, save_ai_memo,
     get_daily_memo, save_daily_memo, now_cn,
     get_companion_name,
+    list_projects, update_project,
 )
 
 # ---- 印象系统参数 ----
@@ -34,13 +35,16 @@ HIGH_FREQ_DECAY_DAYS = 30
 
 # ---- 提取 Prompt ----
 
-EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印象，并判断已有印象是否被强化或推翻。同时生成一份对话摘要。
+EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印象，并判断已有印象是否被强化或推翻。同时生成一份对话摘要。如果用户提到了已有项目的相关信息，把新信息合并进项目摘要。
 
 已有印象：
 {existing_impressions}
 
 上一轮对话摘要：
 {previous_summary}
+
+用户的项目清单和现有摘要：
+{projects_context}
 
 返回 JSON，不要包含其他内容：
 {{
@@ -51,7 +55,10 @@ EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印
     "emotion": {{"value": "情绪", "source": "原因"}} 或 null,
     "current_task": "在做的事" 或 null
   }},
-  "session_summary": "用2-3句话概括当前对话的整体状态：聊了什么话题、用户情绪和意图、有什么待办或决定。要涵盖之前的摘要内容，不要丢失旧信息"
+  "session_summary": "用2-3句话概括当前对话的整体状态：聊了什么话题、用户情绪和意图、有什么待办或决定。要涵盖之前的摘要内容，不要丢失旧信息",
+  "project_updates": {{
+    "项目名": "该项目的新摘要（把旧摘要和对话中的新信息合并压缩成一段话）"
+  }}
 }}
 
 规则：
@@ -63,7 +70,10 @@ EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印
 - 没有新发现时 new_impressions 为空数组
 - daily 是当前状态快照：emotion 是此刻情绪，current_task 是当前在做的事
 - 如果对话中没有情绪或任务相关信息，daily 对应字段填 null
-- session_summary 必须始终填写，即使对话很短"""
+- session_summary 必须始终填写，即使对话很短
+- project_updates 只在对话涉及某个已有项目且有新信息时才填；key 是项目名，value 是合并后的新摘要（覆盖旧的）
+- 项目摘要应压缩保留重要状态（进展、deadline、阻碍、决定），过时信息丢掉；不是逐条追加
+- 如果对话没涉及任何项目或没新信息，project_updates 填空对象 {{}}"""
 
 
 # ---- 印象存取 ----
@@ -144,6 +154,18 @@ def _format_existing_impressions(impressions: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _format_projects_context(projects: list[dict]) -> str:
+    """格式化项目列表 + 现有摘要传给提取 prompt。纯计算，不接 DB。"""
+    if not projects:
+        return "（用户还没有建项目）"
+    lines = []
+    for p in projects:
+        name = p.get("name", "")
+        summary = (p.get("summary") or "").strip() or "（还没有摘要）"
+        lines.append(f"- {name}：{summary}")
+    return "\n".join(lines)
+
+
 # ---- 核心流程 ----
 
 def extract_and_update(user_id: str, chat_history: list, previous_summary: str = "") -> dict:
@@ -160,6 +182,15 @@ def extract_and_update(user_id: str, chat_history: list, previous_summary: str =
         companion_name = get_companion_name(user_id)
     except Exception:
         companion_name = "小白"
+
+    # 拉项目清单和摘要，让 LLM 判断对话里有没有涉及某个项目的新信息
+    try:
+        projects = list_projects(user_id)
+    except Exception as e:
+        logging.warning(f"[Memory] 读取项目清单失败（忽略）: {type(e).__name__}: {e}")
+        projects = []
+    projects_by_name = {p["name"]: p for p in projects}
+    projects_context = _format_projects_context(projects)
 
     recent = chat_history[-20:]
     conv_text = "\n".join(
@@ -178,6 +209,7 @@ def extract_and_update(user_id: str, chat_history: list, previous_summary: str =
         prompt = EXTRACT_PROMPT.format(
             existing_impressions=_format_existing_impressions(impressions),
             previous_summary=previous_summary or "（暂无）",
+            projects_context=projects_context,
         )
 
         resp = client.chat.completions.create(
@@ -263,6 +295,23 @@ def extract_and_update(user_id: str, chat_history: list, previous_summary: str =
     if daily:
         _update_daily_memo(user_id, daily)
         updated = True
+
+    # 项目摘要更新（覆盖式：LLM 已经把旧摘要和新信息合并过了）
+    project_updates = result.get("project_updates") or {}
+    if isinstance(project_updates, dict):
+        for name, new_summary in project_updates.items():
+            if not isinstance(new_summary, str) or not new_summary.strip():
+                continue
+            project = projects_by_name.get(name)
+            if not project:
+                logging.warning(f"[Memory] LLM 想更新不存在的项目 '{name}'，忽略")
+                continue
+            try:
+                update_project(user_id, project["id"], summary=new_summary.strip())
+                logging.info(f"[Memory] 项目'{name}'摘要已更新")
+                updated = True
+            except Exception as e:
+                logging.error(f"[Memory] 更新项目'{name}'摘要失败: {type(e).__name__}: {e}")
 
     # 会话摘要
     session_summary = result.get("session_summary", "") or previous_summary

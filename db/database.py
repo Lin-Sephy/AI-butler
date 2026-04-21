@@ -260,3 +260,116 @@ def save_action_log(user_id: str, recommendation: str, user_action: str,
         "user_action": user_action,
         "timestamp": now_cn().isoformat(),
     }, return_row=False)
+
+
+# ════════════════════════════════════════════════════════════
+# v5.0 新增：daily_routine + project CRUD + 最近 N 天任务查询
+# ════════════════════════════════════════════════════════════
+
+
+# ---- daily_routine（用户日常作息文本） ----
+
+def get_daily_routine(user_id: str) -> str:
+    return _get_profile_field(user_id, "daily_routine")
+
+
+def save_daily_routine(user_id: str, routine: str) -> None:
+    _set_profile_field(user_id, "daily_routine", routine)
+
+
+# ---- project CRUD ----
+
+def create_project(user_id: str, name: str, keywords: list[str],
+                   summary: str = "") -> dict:
+    """创建项目。keywords 是关键词列表（Postgres TEXT[]）。"""
+    return _post("project", {
+        "user_id": user_id,
+        "name": name,
+        "keywords": keywords,
+        "summary": summary,
+    })
+
+
+def list_projects(user_id: str) -> list[dict]:
+    """返回该用户所有项目，按最近更新排序。"""
+    return _get("project", {
+        "user_id": f"eq.{user_id}",
+        "select": "*",
+        "order": "updated_at.desc",
+    })
+
+
+def get_project(user_id: str, project_id: int) -> dict | None:
+    rows = _get("project", {
+        "user_id": f"eq.{user_id}",
+        "id": f"eq.{project_id}",
+        "select": "*",
+    })
+    return rows[0] if rows else None
+
+
+def get_project_by_name(user_id: str, name: str) -> dict | None:
+    """按项目名精确匹配。给 function calling 的 query_project 工具用。"""
+    rows = _get("project", {
+        "user_id": f"eq.{user_id}",
+        "name": f"eq.{name}",
+        "select": "*",
+    })
+    return rows[0] if rows else None
+
+
+def update_project(user_id: str, project_id: int, **fields) -> dict | None:
+    """更新项目字段。只允许改 name / keywords / summary。"""
+    allowed = {"name", "keywords", "summary"}
+    data = {k: v for k, v in fields.items() if k in allowed}
+    if not data:
+        return get_project(user_id, project_id)
+    return _patch("project", {
+        "user_id": f"eq.{user_id}",
+        "id": f"eq.{project_id}",
+    }, data)
+
+
+def delete_project(user_id: str, project_id: int) -> None:
+    _delete("project", {
+        "user_id": f"eq.{user_id}",
+        "id": f"eq.{project_id}",
+    })
+
+
+def find_projects_matching_keyword(user_id: str, text: str) -> list[dict]:
+    """遍历用户的所有项目，返回 keywords 中任意词在 text 里出现的项目。
+
+    纯 Python 匹配（不走 DB 的 array 查询），因为关键词命中要做子串匹配，
+    DB 的 @> 等操作符是完全等值比较，用不上。项目数一般个位数，O(n*m) 可接受。
+    """
+    projects = list_projects(user_id)
+    hits = []
+    for p in projects:
+        kws = p.get("keywords") or []
+        if any(kw and kw in text for kw in kws):
+            hits.append(p)
+    return hits
+
+
+# ---- 最近 N 天任务查询（给 function calling 和第 4 页统计共用） ----
+
+def get_tasks_recent(user_id: str, days: int = 7) -> list[dict]:
+    """返回最近 N 天内 created_at 的任务。"""
+    since = (now_cn() - timedelta(days=days)).isoformat()
+    return _get("task", {
+        "user_id": f"eq.{user_id}",
+        "created_at": f"gte.{since}",
+        "select": "*",
+        "order": "created_at.desc",
+    })
+
+
+def get_tasks_by_project(user_id: str, project_id: int) -> list[dict]:
+    """某项目下的所有任务，按创建时间倒序。"""
+    return _get("task", {
+        "user_id": f"eq.{user_id}",
+        "project_id": f"eq.{project_id}",
+        "select": "*",
+        "order": "created_at.desc",
+    })

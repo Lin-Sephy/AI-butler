@@ -1,7 +1,10 @@
-"""DeepSeek 调用 v4：聊天 + 任务分离架构。
+"""DeepSeek 调用 v5：闲聊 / 计划双模式。
 
-- call_chat()：自然聊天 + 输出观察信号，每轮都调用
-- call_task()：给出具体任务建议，仅 Python 判断需要时调用
+v5.0 重构（2026-04-20，见开工文档）：
+- call_chat(mode="chat"/"plan")：闲聊纯文本，计划模式注册 function calling 工具
+- 闲聊模式无信号块，DS 输出纯文本
+- 计划模式 DS 可调 4 个查询工具，输出末尾可能带 ---judgment---{"confirmed": true}
+- call_task 保留作为 v4 遗留（api.py 当前还在引用，v5.0 完整切换后才砍）
 """
 
 import json
@@ -13,6 +16,7 @@ from prompts.system_prompt import (
     get_chat_prompt, get_task_prompt,
     build_chat_message, build_task_message,
 )
+from core.plan_tools import PLAN_MODE_TOOLS, execute_tool
 
 # ---- API 调用参数 ----
 API_CONFIG = {
@@ -21,6 +25,9 @@ API_CONFIG = {
     "max_tokens": 500,
     "top_p": 0.9,
 }
+
+# 计划模式 function calling 最多几轮
+MAX_TOOL_ROUNDS = 5
 
 # ---- 兜底 ----
 FALLBACK_TEMPLATES = {
@@ -33,14 +40,9 @@ FALLBACK_TEMPLATES = {
 
 MID_CHAT_FALLBACK = "网络开小差了，你刚才说的我没接住——能再说一次吗？"
 
-EMPTY_SIGNAL = {
-    "energy_impression": None,
-    "emotion": None,
-    "mentioned_activity": None,
-    "activity_category": None,
-    "user_attitude": None,
-    "scheduled_time": None,
-}
+# v4 遗留：部分上层代码仍期望 result 里有 signal 字段。v5 里始终为空 dict，
+# 让 should_trigger_task 等老函数拿到 {} 就自然 no-op。
+EMPTY_SIGNAL: dict = {}
 
 
 def _get_client() -> OpenAI:
@@ -53,59 +55,38 @@ def _get_client() -> OpenAI:
     )
 
 
-def _parse_chat_response(raw: str) -> dict:
-    """解析聊天响应：纯文本回复 + 信号块。
+def _parse_chat_reply(raw: str) -> tuple[str, bool]:
+    """从 DS 回复中分离正文和 ---judgment--- 信号块。
 
-    格式：
-        聊天回复文本
-
-        ---signal---
-        {"energy_impression": ..., ...}
+    返回 (reply_text, confirmed)。
+    闲聊模式 DS 不应该输出 judgment 块，但如果有，忽略即可。
+    计划模式仅当 judgment 里 confirmed=true 时 confirmed 返回 True。
     """
-    signal = dict(EMPTY_SIGNAL)
-    reply = raw.strip()
+    if "---judgment---" not in raw:
+        return raw.strip(), False
 
-    if "---signal---" in raw:
-        parts = raw.split("---signal---", 1)
-        reply = parts[0].strip()
-        try:
-            signal_text = parts[1].strip()
-            # 去掉可能的 markdown 代码块标记
-            if signal_text.startswith("```"):
-                signal_text = signal_text.split("\n", 1)[1] if "\n" in signal_text else signal_text[3:]
-            if signal_text.endswith("```"):
-                signal_text = signal_text[:-3]
-            signal_text = signal_text.strip()
-            parsed = json.loads(signal_text)
-            # 只取已知字段
-            for key in EMPTY_SIGNAL:
-                if key in parsed and parsed[key] is not None:
-                    signal[key] = parsed[key]
-        except (json.JSONDecodeError, IndexError) as e:
-            logging.warning(f"[Chat] 信号解析失败: {e}")
+    reply_part, _, signal_part = raw.partition("---judgment---")
+    reply = reply_part.strip()
 
-    # 验证 energy_impression
-    if signal["energy_impression"] is not None:
-        try:
-            val = int(signal["energy_impression"])
-            signal["energy_impression"] = max(1, min(5, val))
-        except (TypeError, ValueError):
-            signal["energy_impression"] = None
+    signal_text = signal_part.strip()
+    if signal_text.startswith("```"):
+        signal_text = signal_text.split("\n", 1)[1] if "\n" in signal_text else signal_text[3:]
+    if signal_text.endswith("```"):
+        signal_text = signal_text[:-3]
+    signal_text = signal_text.strip()
 
-    # 验证 activity_category
-    if signal["activity_category"] not in ("work", "rest", "life", None):
-        signal["activity_category"] = None
+    try:
+        parsed = json.loads(signal_text)
+        confirmed = bool(parsed.get("confirmed"))
+    except (json.JSONDecodeError, AttributeError) as e:
+        logging.warning(f"[Chat] judgment 块解析失败: {e}")
+        confirmed = False
 
-    # 验证 user_attitude
-    if signal["user_attitude"] not in ("wants_help", "wants_to_start", "just_sharing", "frustrated", None):
-        signal["user_attitude"] = None
-
-    return {"reply": reply, "signal": signal}
+    return reply, confirmed
 
 
 def call_chat(user_input: str, energy_level: int,
               chat_history: list | None = None,
-              persona: str = "infp",
               user_memo: str = "",
               ai_memo: str = "",
               daily_memo: str = "",
@@ -113,21 +94,37 @@ def call_chat(user_input: str, energy_level: int,
               session_summary: str = "",
               is_cross_day: bool = False,
               companion_name: str = "小白",
-              custom_persona: str = "") -> dict:
-    """聊天调用：自然聊天 + 输出观察信号。
+              custom_persona: str = "",
+              mode: str = "chat",
+              user_id: str | None = None) -> dict:
+    """聊天调用。
 
-    有 session_summary 时用"摘要 + 最近 5 条"，否则用"最近 20 条"。
-    返回 {"reply": str, "signal": dict}
+    mode="chat"：闲聊模式，不注册工具，纯文本输出
+    mode="plan"：计划模式，注册 4 个查询工具（function calling），
+                 DS 可按需调用；输出末尾可能带 judgment 信号块
+
+    plan 模式必须传 user_id（工具执行要用）。
+
+    返回 {"reply": str, "signal": {}, "confirmed": bool}
+    （signal 始终空 dict，保留字段名是为了 api.py 老代码不崩；
+     confirmed 仅 plan 模式有意义）
     """
     has_history = bool(chat_history)
 
+    if mode == "plan" and not user_id:
+        raise ValueError("call_chat(mode='plan') 需要传 user_id")
+
     if not config.DEEPSEEK_API_KEY:
         fallback = MID_CHAT_FALLBACK if has_history else FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
-        return {"reply": fallback, "signal": dict(EMPTY_SIGNAL)}
+        return {"reply": fallback, "signal": dict(EMPTY_SIGNAL), "confirmed": False}
 
     try:
         client = _get_client()
-        system_prompt = get_chat_prompt(persona, companion_name=companion_name, custom_persona=custom_persona)
+        system_prompt = get_chat_prompt(
+            companion_name=companion_name,
+            custom_persona=custom_persona,
+            mode=mode,
+        )
         user_message = build_chat_message(
             user_input, energy_level,
             user_memo=user_memo, ai_memo=ai_memo,
@@ -136,39 +133,68 @@ def call_chat(user_input: str, energy_level: int,
             is_cross_day=is_cross_day,
         )
 
-        messages = [{"role": "system", "content": system_prompt}]
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
         if chat_history:
-            if session_summary:
-                # 有摘要：传最近 10 条（5 轮），摘要覆盖更早的上下文
-                recent = chat_history[-10:]
-            else:
-                recent = chat_history[-20:]
+            recent = chat_history[-10:] if session_summary else chat_history[-20:]
             for msg in recent:
                 messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": user_message})
 
-        resp = client.chat.completions.create(
-            model=API_CONFIG["model"],
-            temperature=API_CONFIG["temperature"],
-            max_tokens=API_CONFIG["max_tokens"],
-            top_p=API_CONFIG["top_p"],
-            messages=messages,
-        )
+        tools = PLAN_MODE_TOOLS if mode == "plan" else None
 
-        raw = resp.choices[0].message.content
-        logging.warning(f"[Chat raw] {raw[:300]}")
+        # Function calling 循环：闲聊模式一次就出；计划模式可能调工具再返
+        raw_final = ""
+        for _ in range(MAX_TOOL_ROUNDS):
+            resp = client.chat.completions.create(
+                model=API_CONFIG["model"],
+                temperature=API_CONFIG["temperature"],
+                max_tokens=API_CONFIG["max_tokens"],
+                top_p=API_CONFIG["top_p"],
+                messages=messages,
+                tools=tools,
+            )
+            msg = resp.choices[0].message
+            # 把 assistant 消息回写（OpenAI SDK 对象→dict）
+            messages.append(msg.model_dump(exclude_none=True))
 
-        result = _parse_chat_response(raw)
+            if not msg.tool_calls:
+                raw_final = msg.content or ""
+                break
 
-        if not result["reply"]:
-            result["reply"] = FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
+            # 依次执行每个工具调用
+            for tc in msg.tool_calls:
+                name = tc.function.name
+                try:
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                except json.JSONDecodeError:
+                    logging.warning(f"[Chat] 工具 {name} 参数 JSON 解析失败: {tc.function.arguments!r}")
+                    args = {}
+                result = execute_tool(user_id, name, args)
+                logging.info(f"[Chat] tool={name} args={args} → {result[:120]}")
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                })
+        else:
+            logging.warning(f"[Chat] function calling 超过 {MAX_TOOL_ROUNDS} 轮未收敛")
 
-        return result
+        logging.warning(f"[Chat raw] {raw_final[:300]}")
+        reply, confirmed = _parse_chat_reply(raw_final)
+        if not reply:
+            reply = FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
+
+        return {"reply": reply, "signal": dict(EMPTY_SIGNAL), "confirmed": confirmed}
 
     except Exception as e:
         logging.error(f"[Chat] API 调用失败: {type(e).__name__}: {e}")
         fallback = MID_CHAT_FALLBACK if has_history else FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
-        return {"reply": fallback, "signal": dict(EMPTY_SIGNAL)}
+        return {"reply": fallback, "signal": dict(EMPTY_SIGNAL), "confirmed": False}
+
+
+# ════════════════════════════════════════════════════════════
+# call_task：v4 遗留，v5.0 切换完成后和 app.py 一起清理
+# ════════════════════════════════════════════════════════════
 
 
 def _parse_task_response(raw: str) -> dict | None:
@@ -227,15 +253,15 @@ def _validate_task_fields(data: dict) -> dict:
 
 def call_task(user_input: str, energy_level: int,
               chat_history: list | None = None,
-              persona: str = "infp",
               completed_tasks: list[str] | None = None,
               context: str = "",
               companion_name: str = "小白",
               custom_persona: str = "") -> dict:
-    """任务推荐调用：给出具体任务建议。
+    """任务推荐调用：给出具体任务建议（v4 遗留）。
 
-    仅在 Python 判断需要推任务时调用。
-    返回包含 task_keyword/suggested_minutes/task_type/reply 等字段的 dict。
+    v5.0 的计划模式不走这条路径——结构化提取走独立流程。
+    保留此函数是因为 api.py 的 /api/chat 仍在 if trigger 分支里引用。
+    随着 api.py 在 Step 3 改造完成，此函数可删。
     """
     if not config.DEEPSEEK_API_KEY:
         return {
@@ -249,7 +275,7 @@ def call_task(user_input: str, energy_level: int,
 
     try:
         client = _get_client()
-        system_prompt = get_task_prompt(persona, companion_name=companion_name, custom_persona=custom_persona)
+        system_prompt = get_task_prompt(companion_name=companion_name, custom_persona=custom_persona)
         user_message = build_task_message(
             user_input, energy_level,
             context=context,

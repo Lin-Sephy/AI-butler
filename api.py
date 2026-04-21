@@ -18,18 +18,19 @@ from db.database import (
     get_companion_name, save_companion_name,
     get_custom_persona, save_custom_persona,
     get_companion_profile as db_get_companion_profile,
+    get_daily_routine, save_daily_routine,
+    create_project, list_projects, get_project, update_project, delete_project,
+    get_tasks_recent, get_tasks_by_project,
 )
+from core.plan_tools import _tool_query_stats
+from core.plan_extractor import extract_tasks_from_conversation
 from core.auth import get_current_user_id
 from core.memory import (
     update_ai_memory, get_filtered_daily_memo, bump_on_mention,
     get_confirmed_impressions_text, get_impressions_display,
 )
 from core.energy import get_current_energy, update_energy, ENERGY_LEVELS
-from core.intent import call_chat, call_task
-from core.rules_engine import (
-    validate_reply, check_energy_drift, should_trigger_task,
-    should_show_action_buttons, find_matching_task,
-)
+from core.intent import call_chat
 from core.task_manager import (
     create_task, pause_task, resume_task, complete_task, abandon_task,
     get_active_task, update_task_minutes, get_today_tasks, delete_task,
@@ -59,7 +60,7 @@ init_db()
 class ChatRequest(BaseModel):
     message: str
     session_id: str
-    persona: str = "intj"
+    mode: str = "chat"  # "chat" | "plan"
     energy_level: int | None = None  # None 时自动获取当前精力
 
 
@@ -69,6 +70,27 @@ class ChatResponse(BaseModel):
     task_recommendation: dict | None = None
     show_action_buttons: bool = False
     energy_confirm_needed: bool = False
+    confirmed: bool = False  # v5 计划模式：DS 是否判定用户已定稿
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    keywords: list[str] = []
+    summary: str = ""
+
+
+class ProjectUpdateRequest(BaseModel):
+    name: str | None = None
+    keywords: list[str] | None = None
+    summary: str | None = None
+
+
+class DailyRoutineRequest(BaseModel):
+    routine: str
+
+
+class PlanExtractRequest(BaseModel):
+    session_id: str
 
 
 class TaskActionRequest(BaseModel):
@@ -138,7 +160,12 @@ def _build_task_board_text(user_id: str) -> str:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
-    """核心聊天接口：聊天 → 信号解析 → 是否推任务 → 返回结果。"""
+    """v5 聊天接口：闲聊 / 计划双模式。
+
+    闲聊模式：DS 纯文本输出，无信号块，无推任务。
+    计划模式：DS 注册 function calling 工具，可能输出 ---judgment---{"confirmed": true}。
+    """
+    mode = req.mode if req.mode in ("chat", "plan") else "chat"
     energy_level = req.energy_level or get_current_energy(user_id)["energy_level"]
 
     # 保存用户消息
@@ -148,7 +175,7 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
     history = load_session_messages(user_id, req.session_id)
     history = history[:-1]  # 排除刚保存的这条
 
-    # 读取跟宠名字和自定义人格（一次查询拿两个字段）
+    # 读取跟宠名字和自定义人格
     profile = db_get_companion_profile(user_id)
     companion_name = profile["name"]
     custom_persona = profile["custom_persona"]
@@ -163,65 +190,25 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
         chat_result = call_chat(
             req.message, energy_level,
             chat_history=history,
-            persona=req.persona,
             user_memo=memo, ai_memo=ai_memo_text,
             daily_memo=daily_memo_text,
             task_board=task_board_text,
             companion_name=companion_name,
             custom_persona=custom_persona,
+            mode=mode,
+            user_id=user_id,
         )
     except Exception as e:
         logging.error(f"聊天调用出错: {type(e).__name__}: {e}")
-        chat_result = {"reply": "哎呀，出了点小问题。你再说一次？", "signal": {}}
+        chat_result = {"reply": "哎呀，出了点小问题。你再说一次？", "signal": {}, "confirmed": False}
 
-    signal = chat_result.get("signal", {})
     reply = chat_result["reply"]
+    confirmed = chat_result.get("confirmed", False)
 
-    # 精力偏差检测
-    _, energy_confirm_needed = check_energy_drift(signal, energy_level)
-
-    # Python 判断是否触发推任务
-    today_tasks = get_today_tasks(user_id)
-    trigger = should_trigger_task(signal, energy_level, today_tasks)
-
-    task_recommendation = None
-    show_buttons = False
-
-    if trigger:
-        try:
-            done_tasks = [t["keyword"] for t in today_tasks if t["status"] == "completed"]
-            recent_context = "\n".join(
-                f"{'用户' if m['role'] == 'user' else companion_name}: {m['content']}"
-                for m in (history or [])[-6:]
-            )
-            task_resp = call_task(
-                req.message, energy_level,
-                chat_history=history,
-                persona=req.persona,
-                completed_tasks=done_tasks if done_tasks else None,
-                context=recent_context,
-                companion_name=companion_name,
-                custom_persona=custom_persona,
-            )
-
-            is_valid, final_reply = validate_reply(task_resp, energy_level)
-            if not is_valid:
-                task_resp["reply"] = final_reply
-
-            if task_resp.get("reply"):
-                reply = task_resp["reply"]
-
-            if should_show_action_buttons(task_resp):
-                show_buttons = True
-                task_recommendation = task_resp
-
-        except Exception as e:
-            logging.error(f"任务推荐调用出错: {type(e).__name__}: {e}")
-
-    # save_chat_message 走 INSERT 不走 upsert——必须等 reply 最终定版才写，避免一条用户消息对应两条 AI 消息
+    # save_chat_message 走 INSERT 不走 upsert——等 reply 最终定版才写
     save_chat_message(user_id, req.session_id, "assistant", reply)
 
-    # 关键词匹配（零 API 成本）
+    # 关键词匹配（零 API 成本，闲聊模式下帮印象系统刷新计数）
     try:
         bump_on_mention(user_id, req.message)
     except Exception as e:
@@ -229,11 +216,28 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
 
     return ChatResponse(
         reply=reply,
-        signal=signal,
-        task_recommendation=task_recommendation,
-        show_action_buttons=show_buttons,
-        energy_confirm_needed=energy_confirm_needed,
+        signal={},  # v5 无信号块，保留字段为了前端不破
+        task_recommendation=None,
+        show_action_buttons=False,
+        energy_confirm_needed=False,
+        confirmed=confirmed,
     )
+
+
+# ---------- 计划结构化提取（v5） ----------
+
+@app.post("/api/plan/extract")
+def plan_extract(req: PlanExtractRequest, user_id: str = Depends(get_current_user_id)):
+    """从对话中提取结构化 tasks，供前端展示让用户确认后批量写入。
+
+    DS 输出 confirmed: true 后，前端调这个端点。返回候选 tasks 列表，
+    前端让用户编辑（删除/改时长/改项目），确认后走 /api/task/record 批量写入。
+    """
+    history = load_session_messages(user_id, req.session_id)
+    if not history:
+        return {"tasks": []}
+    tasks = extract_tasks_from_conversation(user_id, history)
+    return {"tasks": tasks}
 
 
 # ---------- 任务操作接口 ----------
@@ -455,7 +459,7 @@ def get_messages(session_id: str, user_id: str = Depends(get_current_user_id)):
 
 # ---------- 跟宠设置接口 ----------
 
-CUSTOM_PERSONA_MAX_LENGTH = 200
+CUSTOM_PERSONA_MAX_LENGTH = 1000
 
 
 @app.get("/api/profile/companion")
@@ -465,6 +469,24 @@ def get_companion_endpoint(user_id: str = Depends(get_current_user_id)):
         "name": get_companion_name(user_id),
         "custom_persona": get_custom_persona(user_id),
         "max_persona_length": CUSTOM_PERSONA_MAX_LENGTH,
+    }
+
+
+@app.get("/api/profile/persona_presets")
+def get_persona_presets():
+    """返回 MBTI 三套预设文字（公开接口，不需要登录）。
+
+    前端设置页点 MBTI 按钮时，把对应 key 的文字填进 custom_persona 输入框。
+    用户可以原样保存、改动、或清空。
+    """
+    from prompts.system_prompt import PERSONAS
+    return {
+        "presets": [
+            {"key": "infp", "label": "INFP", "text": PERSONAS["infp"]},
+            {"key": "intj", "label": "INTJ", "text": PERSONAS["intj"]},
+            {"key": "intp", "label": "INTP", "text": PERSONAS["intp"]},
+        ],
+        "max_length": CUSTOM_PERSONA_MAX_LENGTH,
     }
 
 
@@ -491,3 +513,111 @@ def update_companion_profile(req: CompanionUpdateRequest,
         "custom_persona": get_custom_persona(user_id),
         "message": "已更新",
     }
+
+
+# ---------- 日常作息（v5） ----------
+
+DAILY_ROUTINE_MAX_LENGTH = 500
+
+
+@app.get("/api/profile/daily_routine")
+def get_daily_routine_endpoint(user_id: str = Depends(get_current_user_id)):
+    return {
+        "routine": get_daily_routine(user_id),
+        "max_length": DAILY_ROUTINE_MAX_LENGTH,
+    }
+
+
+@app.put("/api/profile/daily_routine")
+def update_daily_routine(req: DailyRoutineRequest,
+                         user_id: str = Depends(get_current_user_id)):
+    routine = req.routine.strip()
+    if len(routine) > DAILY_ROUTINE_MAX_LENGTH:
+        raise HTTPException(400, f"日常作息不能超过 {DAILY_ROUTINE_MAX_LENGTH} 字")
+    save_daily_routine(user_id, routine)
+    return {"routine": routine, "message": "已更新"}
+
+
+# ---------- 项目 CRUD（v5） ----------
+
+PROJECT_NAME_MAX = 30
+PROJECT_SUMMARY_MAX = 1000
+
+
+@app.get("/api/projects")
+def list_projects_endpoint(user_id: str = Depends(get_current_user_id)):
+    return {"projects": list_projects(user_id)}
+
+
+@app.post("/api/projects")
+def create_project_endpoint(req: ProjectCreateRequest,
+                            user_id: str = Depends(get_current_user_id)):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(400, "项目名不能为空")
+    if len(name) > PROJECT_NAME_MAX:
+        raise HTTPException(400, f"项目名不能超过 {PROJECT_NAME_MAX} 字")
+    keywords = [k.strip() for k in (req.keywords or []) if k and k.strip()]
+    summary = (req.summary or "").strip()
+    if len(summary) > PROJECT_SUMMARY_MAX:
+        raise HTTPException(400, f"项目摘要不能超过 {PROJECT_SUMMARY_MAX} 字")
+    project = create_project(user_id, name, keywords, summary)
+    return project
+
+
+@app.patch("/api/projects/{project_id}")
+def update_project_endpoint(project_id: int, req: ProjectUpdateRequest,
+                            user_id: str = Depends(get_current_user_id)):
+    existing = get_project(user_id, project_id)
+    if not existing:
+        raise HTTPException(404, "项目不存在")
+    fields = {}
+    if req.name is not None:
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(400, "项目名不能为空")
+        if len(name) > PROJECT_NAME_MAX:
+            raise HTTPException(400, f"项目名不能超过 {PROJECT_NAME_MAX} 字")
+        fields["name"] = name
+    if req.keywords is not None:
+        fields["keywords"] = [k.strip() for k in req.keywords if k and k.strip()]
+    if req.summary is not None:
+        summary = req.summary.strip()
+        if len(summary) > PROJECT_SUMMARY_MAX:
+            raise HTTPException(400, f"项目摘要不能超过 {PROJECT_SUMMARY_MAX} 字")
+        fields["summary"] = summary
+    updated = update_project(user_id, project_id, **fields)
+    return updated or existing
+
+
+@app.delete("/api/projects/{project_id}")
+def delete_project_endpoint(project_id: int,
+                            user_id: str = Depends(get_current_user_id)):
+    existing = get_project(user_id, project_id)
+    if not existing:
+        raise HTTPException(404, "项目不存在")
+    delete_project(user_id, project_id)
+    return {"message": "已删除"}
+
+
+@app.get("/api/projects/{project_id}/tasks")
+def list_project_tasks(project_id: int,
+                       user_id: str = Depends(get_current_user_id)):
+    existing = get_project(user_id, project_id)
+    if not existing:
+        raise HTTPException(404, "项目不存在")
+    return {"tasks": get_tasks_by_project(user_id, project_id)}
+
+
+# ---------- 任务历史 & 统计（v5） ----------
+
+@app.get("/api/tasks/recent")
+def recent_tasks(days: int = 7, user_id: str = Depends(get_current_user_id)):
+    days = max(1, min(30, days))
+    return {"days": days, "tasks": get_tasks_recent(user_id, days=days)}
+
+
+@app.get("/api/stats")
+def stats_endpoint(user_id: str = Depends(get_current_user_id)):
+    """复用 plan_tools 里的统计逻辑，前端第 4 页也吃这个接口。"""
+    return _tool_query_stats(user_id, {})
