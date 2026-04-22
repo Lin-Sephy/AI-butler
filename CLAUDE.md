@@ -130,83 +130,58 @@ ai-butler/
 **v4 遗留（已清）**：v4 的"call_chat 出信号 → Python 判断 → call_task 推任务"三段式已在
 2026-04-22 全面退役，rules_engine 只剩 L1 单测保护的纯函数残留。详见 docs/死代码清理清单.md。
 
-## 聊天 Prompt 设计（v4 基线 → v4.2.1 回退，2026-04-05）
+## 聊天 Prompt 设计（v5 现状，2026-04-22）
 
-核心发现：**身份定义决定行为，但人格要薄不要厚。**
+**结构分层（`prompts/system_prompt.py`）：**
 
-三天迭代（v4.2 分层架构）后实测发现：v4 基线的简洁风格聊天质量最好。分层架构（本我层/情感层/行为层）给 DS 的信息越多，DS 越像在"执行任务"而不是"聊天"。
-
-当前聊天 prompt 结构（v4 基线风格）：
 ```
-人设块（INFP/INTJ/INTP，简短成长背景描述）
+IDENTITY_LINE（身份：成了精的白鼬 + 铲屎官关系）
 ↓
-一句话身份定义："用户是你的朋友，你正在慢慢了解他。像朋友一样自然聊天就好。"
+HONESTY_RULES（硬约束：不编日期 / 事件 / 能力；被纠正直接认错）
 ↓
-6 条回复原则 + 5 条绝对禁止
-↓
-信息参考优先级 + 输出格式（信号块）
+[闲聊模式] MODE_SWITCH_HINT（提到任务话题顺口提示切模式）
+[两模式共有] custom_persona（用户 textarea 原文，可选）
+[任务模式] PLAN_MODULE（指导 DS 先查数据、批量用 delete_tasks / create_tasks）
 ```
 
-**3 个人格可选（INFP/INTJ/INTP），各自简短描述，无话术参考。**
-- INFP：共情敏感，关心朋友，保护自己的感情
-- INTJ：高效理性，拆解困难，偶尔傲娇
-- INTP：观察建模，帮朋友看清自己
+**custom_persona（v5 架构）**：只一个字段。MBTI 三个预设模板存在 `PERSONAS` 字典（infp / intj / intp key），前端 `PersonaPresets` 点按钮把对应预设文字填入 textarea，用户可改可自填。不再是独立枚举。前端按钮用"预设 1/2/3 + 摘要词"展示避免身份标签骗人。
 
-> v4.2 分层架构的探索过程和被推翻的原因见 docs/portfolio/2026-04-04_prompt分层架构发现.md（含后续验证注释）和 docs/ds多版本prompt对比/prompt迭代研究：变量分析框架.md
+**历史：** v4.2 分层架构探索 + v4.2.1 回退过程见 `docs/portfolio/2026-04-04_prompt分层架构发现.md`。
 
-## 精力系统要点
+## AI 输出格式（v5 现状）
 
-- 五档：5巅峰 / 4良好 / 3一般 / 2低迷 / 1耗竭
-- 三级采集策略：静默继承（零成本）→ 轻触确认（一句话）→ 完整采集（2-3个问题）
-- 精力值 = min(睡眠上限, 体感调整, 已消耗调整)
-- 用户始终可以手动覆盖
+**闲聊模式 (`mode="chat"`)**：纯文本。无信号块，无工具。
 
-## AI 输出格式（双 prompt 分离）
-
-**call_chat 输出：** 纯文本聊天回复 + `---signal---` 信号块
+**任务模式 (`mode="plan"`)**：
+- 注册 function calling 工具（在 `core/plan_tools.py`）：
+  - 查：`query_tasks` / `query_stats` / `query_project` / `query_schedule`
+  - 改：`delete_tasks`（批量）/ `delete_task`（单条）/ `create_tasks`（批量写入）
+- DS 在对话里按需调工具直接动数据库（**不是口头模拟**）
+- 用户表示定稿（"就这样/记下来/按这个来"）时，DS 在回复末尾加一个 judgment 信号块：
 
 ```
-聊天回复文本
+回复文本...
 
----signal---
-{"energy_impression": 4, "emotion": "平静", "mentioned_activity": "写论文", "activity_category": "work", "user_attitude": "wants_help", "scheduled_time": null}
+---judgment---
+{"confirmed": true}
 ```
 
-信号字段：energy_impression（精力感知1-5）、emotion（情绪）、mentioned_activity（提到的事项）、activity_category（work/rest/life/null）、user_attitude（wants_help/wants_to_start/just_sharing/frustrated/null）、scheduled_time（提到的未来时间）
+- 前端 `PlanConfirmModal` 在 `confirmed: true` **且** 本轮 `created_tasks` 非空时弹窗，让用户对**已落库**的新任务做事后编辑（改名 / 改时长 / 删除）
 
-**call_task 输出：** JSON（仅 Python 触发时调用）
+**v4 遗留（2026-04-22 全清）**：`call_chat` 的 `---signal---` 六字段信号块 + `call_task` JSON 输出 + rules_engine 触发判断 + "记录/再聊聊"按钮 + 精力档位相关全部退役，详见 `docs/死代码清理清单.md`。
 
-```json
-{
-  "task_keyword": "具体行动",
-  "suggested_minutes": 25 或 null,
-  "task_type": "work | rest",
-  "scheduled_at": null,
-  "scheduled_keyword": null,
-  "reply": "回复内容"
-}
-```
+## 数据库表（v5 现状）
 
-## 推荐展示方式：对话式单推荐（v4.1 改版）
+**核心 6 张（MVP 起就有）：** user_profile / task / recurring_task / energy_log / action_log / chat_session
 
-- 一次只展示一条推荐，通过对话引导
-- **"记录"按钮**在 work + (wants_help 或 wants_to_start) + task_keyword 非空时出现，点击后任务以 idle 状态写入任务栏，不自动开始
-- **"再聊聊"按钮**：清除推荐回到纯聊天，不调 API
-- 聊天模式下不展示任何按钮
-- rest 类不弹按钮，不进入任务栏
-- 用户的每次选择都写入 action_log
+**v5 新增 + 改动：**
+- `project`（新建，v5 新增）：项目管理（name / keywords / summary）
+- `user_profile` 加字段：`daily_routine`（作息文本）、`llm_provider / llm_base_url / llm_model / llm_api_key`（BYOK 4 字段）
+- `task` 加字段：`project_id`（项目归属）、`scheduled_at`（任务开始时间，时间轴视图前置依赖）
 
-## 精力值动态感知
+详细字段定义见 `db/migration_v2.sql` / `db/migration_v5.sql` / `db/migration_byok.sql`。
 
-- AI 在聊天信号中报告 energy_impression，信息不够填 null
-- energy_impression 与系统精力值偏差 >= 2 档时，弹出快捷按钮让用户确认
-- 聊天模式不传精力档位给 DS，DS 靠对话自己感知（v4.1 改动）
-- 任务栏信息也传给 DS 聊天参考，信息参考优先级：用户当轮输入 > 对话历史 > 每日记忆/长期记忆 > 任务栏
-
-## 数据库表（6 张）
-
-6 张表：user_profile、energy_log、task、recurring_task、action_log、chat_session。
-详细字段定义见 MVP 需求文档第六章。
+**⚠️ `db/migration_byok.sql` 需要手动去 Supabase SQL Editor 跑**（代码改完了但字段没在表里，`/api/profile/llm` 会报"字段不存在"类错误）。
 
 ## 开发进度
 

@@ -299,11 +299,21 @@
 - ✅ 接入 FastAPI 聊天 API（/api/chat → reply + signal + task_recommendation 全链路通）
 - ✅ 第一版 SVG（站立全身01 + 歪头03）已替换为更精修版（1歪头 / 2-3 思考侧脸正脸 / 4 思考侧脸半身）
 
+#### 2b 已完成（2026-04-21/22，一系列小 commit）
+
+- ✅ **聊天页 ⚙️ 设置面板**——`SettingsPanel.jsx` 六区块：小白命名 / 性格（`PersonaPresets` 子组件：预设 1/2/3 + 自定义 textarea） / 日常作息 / 用户手记 / AI 记忆（只读 + 清空） / API key（真 BYOK）
+- ✅ **MBTI UX 改版**——前端按钮改"预设 1/2/3 + 摘要词"，避免用户改完 textarea 后按钮名称骗人；后端 `PERSONAS` 字典仍然保留 infp/intj/intp 作为 key
+- ✅ **模式切换 UI (`ModeToggle`)**——顶栏"闲聊 ↔ 任务" toggle，mode 持久化到 localStorage（防 HMR 重载回退）；切换瞬间顶部飘一条胶囊提示 `ModeHintBanner`
+- ✅ **v5 function calling 工具扩展**——`core/plan_tools.py` 加 `delete_tasks`（批量） + `create_tasks`（批量写入）+ `delete_task`（单条）；`intent.py` call_chat 的 `MAX_TOOL_ROUNDS` 从 5 提到 15，收集 tool 结果回传给前端
+- ✅ **`PlanConfirmModal` P2 版**——原 P1 的 `/api/plan/extract` 流程整个砍掉，改成 DS 直接调 create_tasks 写库 → 前端拿到 `created_tasks` 后弹窗让用户"事后编辑"（改 keyword / 改时长 / 删）；后端加 `POST /api/task/{id}/keyword` 端点
+- ✅ **HONESTY_RULES + MODE_SWITCH_HINT**——prompt 加硬约束防幻觉 + 闲聊模式下提到调整任务自动提示切计划模式
+- ✅ **性能链路优化**——`db.database` 用 `httpx.Client` 持久连接复用 TLS（首次握手后后续 20-50ms）+ 3 次重试；`/api/chat` 的 Supabase 调用从 8 次砍到 4 次（`get_full_profile` 一次 SELECT \* + 砍 `get_current_energy` + 砍 `_build_task_board_text`）
+- ✅ **前端 apiFetch 幂等重试**——GET 请求遇网络错/5xx 自动重试 2 次（500ms 间隔），POST/PUT/DELETE 不重试避免副作用
+- ✅ **BYOK 前后端已通**——`LlmConfig.jsx` 子组件（5 预设 provider：DeepSeek / OpenAI / 智谱 / 硅基流动 / 其他）+ 后端 `/api/profile/llm` GET/PUT/DELETE + `db/migration_byok.sql` 加 4 字段 + `intent.py` `_get_client(user_llm)` 支持回退
+
 #### 2 剩余待办
 - ⏳ **手机端拉窄实测** —— Sephy 还没在真手机/devtools 模拟器上看，确认气泡/白鼬/堆叠在 iPhone 12 Pro 宽度（390px）下不挤不溢
-- ⏳ **聊天记任务 → 任务页同步** —— ChatContext.record() 调 /api/task/record 写库成功，但 TasksPage 不知道这事，得切 tab 重新 fetch 才看到新任务。需要 TasksContext（由小克2）或 ChatContext 在 record 后广播，让 TasksPage 即刻刷新
-- ⏳ **聊天页 ⚙️ 设置面板**（**人格选择 / 自粘贴性格 / 小白命名 / 用户手记 / AI 自动记忆查看清空 / API key 占位禁用**）—— 当前 ⚙️ 只 alert 占位
-- ⏳ **prompt 减少八百个问题**（设置面板做完后一起做：默认禁问 + INFP/INTP persona 块微调）
+- ⏳ **聊天记任务 → 任务页即刻刷新** —— ChatContext 已暴露 `lastCreatedTasks`，弹窗编辑体验有了；但 TasksPage 本身仍需切 tab 重 mount 才 fetch。apiFetch 加了自动重试后偶发 fail 大幅缓解，仍未做"主动广播刷新"
 - ⏳ **state machine 接入新 SVG** —— 当前只用 stoat-standing；listening 时该换 1歪头，thinking 时换 2/4 思考侧脸（半身/全身按场景）。Step 3 整体状态机时统一接
 
 **完成标志：** 聊天推任务 → 页面 1 看到 → 开始专注，全链路闭环
@@ -325,7 +335,7 @@
 
 - 移动端适配
 - 精力系统 UI 接入 ~~← v5.0 砍了，不做~~
-- **BYOK API key 真实接入**（数据库加字段 + 后端读 user key + 加密存储 + 验证 key 有效性）—— v2 锁 DeepSeek，不做模型下拉
+- ✅ **BYOK API key 真实接入**（2026-04-22 完成）——user_profile 加 4 字段（provider / base_url / model / api_key）+ 后端 GET/PUT/DELETE `/api/profile/llm` + 前端 `LlmConfig.jsx` 5 预设 provider + `intent.py` 按用户配置切 client；**Supabase SQL migration 需要手动跑 `db/migration_byok.sql`**；api key 明文存 Supabase（上线前加密待做）；无 key 自动回退服务端默认 DeepSeek
 - Vercel + Render 部署
 
 ---
@@ -374,25 +384,27 @@
 
 背景：2026-04-20 prompt + 产品架构重构，详见 `docs/ds多版本prompt对比/2026-04-20_v5.0_开工文档.md`。以下是前端需要配合的改动：
 
-### 聊天页
+### 聊天页 ✅ 全部完成（2026-04-22）
 
-- ⏳ **模式切换 UI**：聊天页加一个"闲聊 / 计划"切换开关（默认闲聊）。切到计划模式会显示一个提示条"小白切换到计划模式了"
-- ⏳ **ChatRequest 去掉 `persona` 字段**：v5.0 后端不再接收这个字段（MBTI 只是设置页里的 custom_persona 预设）
-- ⏳ **ChatRequest 加 `mode` 字段**：值 `"chat"` 或 `"plan"`
-- ⏳ **计划确认界面**：DS 输出 `{"confirmed": true}` 时，前端弹"已识别到计划，记录？"按钮。点击后调用 `/api/plan/extract`（后端待建）拿到结构化 tasks 列表，显示可编辑清单，用户确认后批量写入
+- ✅ **模式切换 UI（`ModeToggle`）**：header 左侧"闲聊 ↔ 任务" toggle，mode 持久化 localStorage（防 HMR/刷新回退）；切换时顶部胶囊提示"小白切换到任务模式了"
+- ✅ **ChatRequest 去掉 `persona` 字段**：v5.0 架构落地
+- ✅ **ChatRequest 加 `mode` 字段**：`"chat"` 或 `"plan"`
+- ✅ **计划确认界面（改成 P2 版）**：从 P1（DS confirmed → 前端调 `/api/plan/extract` 提取 → 用户审核后批量写库）改成 **P2（DS 直接调 `create_tasks` 工具写库 → 前端 `PlanConfirmModal` 弹窗给用户事后编辑）**。`/api/plan/extract` 整个砍了，改由 `core/plan_tools.py` 的 function calling 工具直接动数据库；弹窗从"批量确认记录"改成单条改名 / 改时长 / 删除（各自独立端点）
 
-### 设置页（⚙️，当前 alert 占位）
+### 设置页 ⚙️ ✅ 全部完成（2026-04-21/22）
 
-- ⏳ **性格选择 UX 改版**：MBTI 三个按钮不是独立选项，而是"点击后把预设文字填进 custom_persona 输入框"的模板。用户可以改、可以清空、可以自填。只保存 custom_persona 一个字段
-- ⏳ 小白命名输入框
-- ⏳ 用户手记输入框
-- ⏳ AI 自动记忆查看 / 清空
-- ⏳ 日常作息输入框（新增，对应 user_profile.daily_routine）
+- ✅ **性格选择 UX 改版（`PersonaPresets`）**：MBTI 按钮改成"预设 1/2/3 + 摘要词"（共情陪伴 / 高效拆解 / 观察点破）——避免用户改完 textarea 后按钮名称骗人。点按钮填 custom_persona；非空时覆盖弹 confirm。后端 `PERSONAS` 字典保留 infp/intj/intp 作为 key
+- ✅ 小白命名输入框
+- ✅ 用户手记输入框（新加后端 `USER_MEMO_MAX_LENGTH = 2000` 校验 + GET 返回 max_length）
+- ✅ AI 自动记忆查看 / 清空
+- ✅ 日常作息输入框（`user_profile.daily_routine`）
+- ✅ **API key 真 BYOK（`LlmConfig.jsx`）**：5 预设 provider（DeepSeek / OpenAI / 智谱 / 硅基流动 / 其他），切 provider 自动填 base_url + model 候选；api_key 掩码回显；独立保存/清空按钮——详见第 5 步
 
-### 项目管理入口
+### 项目管理入口（v5 核心不依赖，前端延后）
 
-- ⏳ **新页/新 Tab 或设置页子项**：列项目、建项目（名字 + 关键词）、查看/编辑摘要、看关联任务
-- ⏳ 建任务时 keyword 自动匹配现有 project keywords，匹配上就自动挂（用户可改）
+- ⏳ 新页/新 Tab 或设置页子项：列项目、建项目、编辑摘要、看关联任务
+- ⏳ 建任务 keyword 自动匹配 project keywords
+- 后端项目 CRUD 已有（`/api/projects` 全套）+ `query_project` function 已注册，DS 能查；前端 UI 待做
 
 ### 数据统计页（第 4 页）
 
@@ -411,14 +423,12 @@
 ### 上线后运维（backlog，非核心，等测完 v5 功能再评估）
 
 - ⏳ **Render 冷启动防护**：免费版 15 分钟无请求会 sleep，第一次访问冷启动 30s，前端 fetch 会超时
-  - 方案 A：`apiFetch` 加统一超时 15s + 首次失败自动重试 1 次
+  - 方案 A：`apiFetch` 加统一超时 15s + 首次失败自动重试 1 次 ← ✅ 前端 apiFetch 已加 GET 自动重试 2 次（2026-04-22）
   - 方案 B：Render 升付费 / cron 每 10 分钟 ping 保活
-  - 触发条件：真实用户反馈打开就转圈 / console 看到 "Failed to fetch" 再做
-- ⏳ SettingsPanel 已有手动"重试"按钮兜底（2026-04-21 加）
-- ⏳ **Supabase 连接根治：换 `httpx.Client()` 持久连接池**（db/database.py）
-  - 当前已有重试兜底（2026-04-22 加），`_TIMEOUT=15 + _MAX_RETRIES=2`
-  - 但每次请求独立握手 TLS 开销大。换 Client 可复用连接，快且稳
-  - 触发条件：上线 Render 后真实用户有反馈再做；本地测试重试兜底已够
+  - 触发条件：真实用户反馈打开就转圈 / console 看到 "Failed to fetch" 再做（A 已部分覆盖）
+- ✅ **Supabase 连接根治：换 `httpx.Client()` 持久连接池**（2026-04-22 完成）
+  - `db/database.py` 改用全局 `httpx.Client()`（max_connections=20，keepalive=10，keepalive_expiry=60s）复用 TLS session；重试次数从 2 提到 3；本地 → Singapore 的 SSL handshake 偶发超时从 ~23% 降到个位数
+  - 上线 Render 后同云区链路理论上更稳，这层兜底仍保留
 
 ---
 
