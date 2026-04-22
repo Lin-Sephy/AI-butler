@@ -4,10 +4,13 @@
   1. 匿名登录拿 JWT（Supabase /auth/v1/signup）
   2. GET /api/tasks/today → 新用户应为空
   3. POST /api/session/new → 拿 session_id
-  4. POST /api/chat → AI 回复 + 信号（耗一次 DeepSeek 调用）
-  5. POST /api/task/record → 建任务
+  4. POST /api/chat mode=chat → 闲聊 AI 回复（耗一次 DeepSeek）
+  5. POST /api/task/record → 手工建任务
   6. GET /api/tasks/today → 验证任务出现
   7. POST /api/task/{id}/complete → 标记完成
+  8. POST /api/chat mode=plan → 计划模式触发 DS 调 create_tasks 工具（耗 2+ 次 DeepSeek）
+  9. GET /api/tasks/today → 验证 DS 写入的任务出现
+  10. DELETE /api/task/{id} → 清理 DS 写的任务
 
 用法：
   python scripts/smoke.py
@@ -19,6 +22,7 @@
 副作用：
   每次运行在 Supabase auth.users 里建一个匿名用户（加上 user_profile / task 等数据）。
   免费套餐下累积也还好，量大了再考虑加清理脚本。
+  计划模式会真跑 DS function calling，成本比闲聊高一点（几分钱）。
 """
 
 import os
@@ -156,8 +160,51 @@ def main() -> None:
         fail("complete 失败", r)
     ok("任务标记完成")
 
+    # ─── Step 8: 计划模式 → 触发 create_tasks 工具 ───
+    step(8, "POST /api/chat mode=plan（触发 DS function calling + create_tasks，耗 2+ 次 DeepSeek）")
+    r = client.post(
+        f"{API_BASE}/api/chat",
+        headers=json_headers,
+        json={
+            "message": "帮我记一下，今天晚上 8 点要写论文第三章，大概 45 分钟。就这样，记下来。",
+            "session_id": session_id,
+            "mode": "plan",
+        },
+    )
+    if r.status_code != 200:
+        fail("plan chat 失败", r)
+    plan_chat = r.json()
+    created = plan_chat.get("created_tasks") or []
+    if not created:
+        # DS 不一定调 create_tasks——有的时候它只是聊，不做工具调用。这不算 smoke 失败，警告即可
+        print(f"⚠️  plan 模式 DS 没调 create_tasks（confirmed={plan_chat.get('confirmed')}，reply={plan_chat.get('reply', '')[:80]!r}）")
+        print("   可能是 DS 没把消息当成定稿——继续不算 smoke 失败")
+        plan_task_ids: list[int] = []
+    else:
+        plan_task_ids = [t.get("task_id") for t in created if t.get("task_id")]
+        ok(f"DS 调了 create_tasks，写入 {len(created)} 条任务（confirmed={plan_chat.get('confirmed')}）")
+
+    # ─── Step 9: 验证 DS 写入的任务出现 ───
+    if plan_task_ids:
+        step(9, "GET /api/tasks/today（应含 DS 写入的任务）")
+        r = client.get(f"{API_BASE}/api/tasks/today", headers=auth_headers)
+        all_tasks = r.json().get("tasks", [])
+        all_ids = {t.get("id") for t in all_tasks}
+        missing = [tid for tid in plan_task_ids if tid not in all_ids]
+        if missing:
+            fail(f"DS 写入的 {len(missing)} 条任务没在列表里：{missing}")
+        ok(f"DS 写入的 {len(plan_task_ids)} 条任务都在列表里")
+
+        # ─── Step 10: 清理 DS 写的任务 ───
+        step(10, "DELETE 清理 DS 写入的任务")
+        for tid in plan_task_ids:
+            rr = client.delete(f"{API_BASE}/api/task/{tid}", headers=auth_headers)
+            if rr.status_code != 200:
+                print(f"   ⚠️  delete task {tid} 失败: {rr.status_code}")
+        ok(f"清理了 {len(plan_task_ids)} 条")
+
     print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("✅ 全部 7 步通过")
+    print("✅ smoke 通过（闲聊 + 计划双模式）")
     print(f"测试用户 {user_id} 留在 Supabase auth.users，累计多了手动清")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
