@@ -7,6 +7,7 @@ v2 多用户改造（2026-04-15）：
 """
 
 import logging
+import os
 import uuid
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,9 +45,17 @@ from core.task_manager import (
 
 app = FastAPI(title="AI 身体状态计划管家", version="2.0.0")
 
+# CORS 允许来源：读环境变量 ALLOWED_ORIGINS 白名单，逗号分隔。
+# 不配或配 "*" 时退回全放（本地开发方便；生产必须配具体域名，如 Vercel 前端 URL）
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "*").strip()
+if _raw_origins == "*":
+    _allowed_origins = ["*"]
+else:
+    _allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 开发阶段允许所有来源，部署时收紧
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],   # 包含 Authorization
