@@ -202,11 +202,13 @@ def _tool_query_stats(user_id: str, args: dict) -> dict:
     if not tasks:
         return {"message": "最近 30 天还没有任务记录"}
 
-    # 完成率
+    # 完成率 = 完成数 / 真尝试过的任务数（completed + abandoned）
+    # 分母不包括 idle / scheduled 等未动过的任务，避免把"还没开始"的也当成"没完成"
     total = len(tasks)
     completed = sum(1 for t in tasks if t.get("status") == "completed")
     abandoned = sum(1 for t in tasks if t.get("status") == "abandoned")
-    completion_rate = round(completed / total * 100, 1) if total else 0
+    attempted = completed + abandoned
+    completion_rate = round(completed / attempted * 100, 1) if attempted else 0
 
     # 平均专注时长（只算完成的任务的 default_minutes）
     durations = [
@@ -365,8 +367,8 @@ def _tool_create_tasks(user_id: str, args: dict) -> dict:
     if not isinstance(raw, list) or not raw:
         return {"error": "tasks 必须是非空任务列表"}
 
-    # 能量档位读一个占位值（v5.0 不再依赖精力档位）
-    energy_level = 3
+    # v5.0 不再依赖精力档位，task.energy_at_start 写 NULL（DB 允许）
+    energy_level = None
 
     created: list[dict] = []
     failed: list[dict] = []

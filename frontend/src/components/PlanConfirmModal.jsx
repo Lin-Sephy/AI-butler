@@ -56,12 +56,8 @@ export default function PlanConfirmModal({ initialTasks, onClose }) {
     }
   }
 
-  async function handleChangeType(task, task_type) {
-    if (task_type === task.task_type) return
-    // 后端 task_type 没有独立端点，这里只改本地状态（初版先不支持换 work/rest）
-    // 用户如果想改类型，在任务页支持的话再走；这里暂时允许本地 UI 切换但不持久化
-    patchTask(task.task_id, { task_type })
-  }
+  // 后端 task_type 改动还没开 endpoint。先禁用 UI 切换避免"关弹窗再打开就回去"的数据不一致。
+  // 要真支持改类型再加 POST /api/task/{id}/type 端点 + 这里解锁
 
   async function handleDelete(task) {
     const prev = tasks
@@ -149,7 +145,6 @@ export default function PlanConfirmModal({ initialTasks, onClose }) {
                 task={task}
                 onChangeKeyword={kw => handleChangeKeyword(task, kw)}
                 onChangeMinutes={m => handleChangeMinutes(task, m)}
-                onChangeType={t => handleChangeType(task, t)}
                 onDelete={() => handleDelete(task)}
               />
             ))
@@ -185,7 +180,7 @@ export default function PlanConfirmModal({ initialTasks, onClose }) {
 
 // ════════════ 单行任务 ════════════
 
-function TaskRow({ task, onChangeKeyword, onChangeMinutes, onChangeType, onDelete }) {
+function TaskRow({ task, onChangeKeyword, onChangeMinutes, onDelete }) {
   const { keyword, minutes, task_type } = task
   const [localKw, setLocalKw] = useState(keyword || '')
   const minuteOptions = task_type === 'rest' ? REST_MINUTES : WORK_MINUTES
@@ -273,15 +268,21 @@ function TaskRow({ task, onChangeKeyword, onChangeMinutes, onChangeType, onDelet
 
         <span style={{ width: 12 }} />
 
-        {['work', 'rest'].map(t => (
-          <MiniChip
-            key={t}
-            selected={task_type === t}
-            onClick={() => onChangeType(t)}
-          >
-            {t === 'work' ? '专注' : '休息'}
-          </MiniChip>
-        ))}
+        {/* work/rest 是只读——后端还没开改类型的 endpoint，先不让用户点
+            避免"关弹窗再打开就回去"的数据不一致 */}
+        <span
+          title="类型在任务页改"
+          style={{
+            padding: '4px 10px',
+            borderRadius: 999,
+            border: '1px solid var(--color-line)',
+            background: 'var(--color-base)',
+            color: 'var(--color-subtle)',
+            fontSize: 12, fontFamily: "'Inter', system-ui, sans-serif",
+          }}
+        >
+          {task_type === 'rest' ? '休息' : '专注'}
+        </span>
       </div>
     </div>
   )

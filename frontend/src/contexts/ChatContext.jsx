@@ -28,8 +28,19 @@ import { useAuth } from './AuthContext.jsx'
 import { newSession, loadHistory, sendMessage } from '../lib/chatApi.js'
 
 const SESSION_KEY = 'ai-butler-session-id'
+const MODE_KEY = 'ai-butler-chat-mode'
 
 const ChatContext = createContext(null)
+
+// localStorage 读 mode，不是合法值就回退 'chat'
+function _readSavedMode() {
+  try {
+    const raw = localStorage.getItem(MODE_KEY)
+    return raw === 'plan' ? 'plan' : 'chat'
+  } catch {
+    return 'chat'
+  }
+}
 
 export function ChatProvider({ children }) {
   const { user, loading: authLoading } = useAuth()
@@ -38,9 +49,15 @@ export function ChatProvider({ children }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [mode, setMode] = useState('chat')
+  const [mode, setModeRaw] = useState(_readSavedMode)
   const [planConfirmed, setPlanConfirmed] = useState(false)
   const [lastCreatedTasks, setLastCreatedTasks] = useState([])   // v5.0 p2: DS 本轮 create_tasks 写入的任务，PlanConfirmModal 事后编辑用
+
+  // setMode 包一层：同步落 localStorage，避免刷新丢
+  const setMode = useCallback(next => {
+    setModeRaw(next)
+    try { localStorage.setItem(MODE_KEY, next) } catch {}
+  }, [])
 
   const bootstrapped = useRef(false)
 
