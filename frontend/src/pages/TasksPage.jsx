@@ -36,12 +36,11 @@ export default function TasksPage() {
 
   async function handleAction(action, taskId) {
     try {
-      await apiFetch(`/api/task/${taskId}/${action}`, { method: 'POST' })
+      const res = await apiFetch(`/api/task/${taskId}/${action}`, { method: 'POST' })
       if (action === 'start') {
-        await fetchTasks()
-        const updated = (await apiFetch('/api/tasks/today')).tasks || []
-        const started = updated.find(t => t.id === taskId && t.status === 'executing')
-        if (started) setFocusTask(started)
+        // POST 返回的 task 已是 executing，直接进 FocusOverlay，不再重查一次
+        if (res?.task?.status === 'executing') setFocusTask(res.task)
+        fetchTasks()
       } else {
         setFocusTask(null)
         await fetchTasks()
@@ -68,9 +67,11 @@ export default function TasksPage() {
   // 分组
   const executing = tasks.filter(t => t.status === 'executing')
   const paused = tasks.filter(t => t.status === 'paused')
+  const scheduled = [...tasks.filter(t => t.status === 'scheduled')]
+    .sort((a, b) => (a.scheduled_at || '').localeCompare(b.scheduled_at || ''))
   const idle = tasks.filter(t => t.status === 'idle')
   const completed = tasks.filter(t => t.status === 'completed')
-  const activeTasks = [...executing, ...paused, ...idle]
+  const activeTasks = [...executing, ...paused, ...scheduled, ...idle]
 
   if (loading) {
     return <CenterText>加载中…</CenterText>
@@ -98,6 +99,7 @@ export default function TasksPage() {
           fontFamily: "'Inter', system-ui, sans-serif",
         }}>
           {executing.length > 0 && `执行中 ${executing.length}`}
+          {scheduled.length > 0 && ` · 预定 ${scheduled.length}`}
           {idle.length > 0 && ` · 待完成 ${idle.length}`}
           {completed.length > 0 && ` · 已完成 ${completed.length}`}
         </span>

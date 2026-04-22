@@ -4,15 +4,32 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
   const [elapsed, setElapsed] = useState(0) // 秒
   const [paused, setPaused] = useState(false)
   const intervalRef = useRef(null)
+  // 以 Date.now() 为基准，避免 tab 不可见时 setInterval 被浏览器节流导致秒数丢失
+  const startTimeRef = useRef(Date.now())
+  const pausedAccumRef = useRef(0) // 累计暂停毫秒
+  const pauseStartRef = useRef(null) // 当前暂停段起点，未暂停时为 null
 
   const totalSeconds = (task.default_minutes || 25) * 60
   const isCountdown = !!task.default_minutes
   const remaining = Math.max(0, totalSeconds - elapsed)
 
+  // 暂停状态切换时维护累计暂停时长
   useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      if (!paused) setElapsed(s => s + 1)
-    }, 1000)
+    if (paused) {
+      pauseStartRef.current = Date.now()
+    } else if (pauseStartRef.current !== null) {
+      pausedAccumRef.current += Date.now() - pauseStartRef.current
+      pauseStartRef.current = null
+    }
+  }, [paused])
+
+  useEffect(() => {
+    function recompute() {
+      if (paused) return
+      const now = Date.now()
+      setElapsed(Math.floor((now - startTimeRef.current - pausedAccumRef.current) / 1000))
+    }
+    intervalRef.current = setInterval(recompute, 1000)
     return () => clearInterval(intervalRef.current)
   }, [paused])
 
@@ -23,15 +40,16 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
     }
   }, [remaining, isCountdown])
 
-  // tab 可见性：隐藏时暂停动画（不暂停计时——专注时间要真实）
+  // 切回 tab 时立即补齐显示（interval 可能被节流到 1 次/分钟，不等下一个 tick）
   useEffect(() => {
     function handleVisibility() {
-      // 不暂停计时器——用户切走了不代表停止专注
-      // 桌宠可以在这里做反应（第 3 步）
+      if (document.hidden || paused) return
+      const now = Date.now()
+      setElapsed(Math.floor((now - startTimeRef.current - pausedAccumRef.current) / 1000))
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)
-  }, [])
+  }, [paused])
 
   const displaySeconds = isCountdown ? remaining : elapsed
   const mm = String(Math.floor(displaySeconds / 60)).padStart(2, '0')
@@ -117,15 +135,6 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
         </button>
       </div>
 
-      {/* 白噪音占位（Sephy 后续找音源） */}
-      <div style={{
-        position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
-        display: 'flex', gap: 12, alignItems: 'center',
-        color: 'var(--color-subtle)', fontSize: 13,
-      }}>
-        <span style={{ opacity: 0.5 }}>🎧 白噪音（待接入）</span>
-      </div>
-
       {/* 桌宠占位（第 3 步做真 SVG 白鼬） */}
       <div style={{
         position: 'absolute', bottom: 40, right: 40,
@@ -135,7 +144,7 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 24,
       }}>
-        🦦
+        ❄
       </div>
     </div>
   )

@@ -24,6 +24,16 @@ const STOAT_WIDTH = 220
 const BUBBLE_MAX_LEN = 100      // 小白气泡：超过截断 + "更多"
 const USER_BUBBLE_MAX_LEN = 50  // 用户气泡：更短（防堆高度挡白鼬）
 
+// 闲聊模式下打出这些词时顺手提示切任务模式
+const PLAN_INTENT_KEYWORDS = [
+  '安排', '计划', '改一下', '删', '取消', '推到', '推后',
+  '加一个', '加个', '今天做', '明天做', '任务', '待办',
+]
+function hasPlanIntent(text) {
+  if (!text) return false
+  return PLAN_INTENT_KEYWORDS.some(k => text.includes(k))
+}
+
 export default function ChatPage() {
   const {
     messages, loading, error, send, resetSession, mode, setMode,
@@ -35,6 +45,15 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [modeHint, setModeHint] = useState(null)  // 切换提示条文案，1.8s 自动消失
+  const [thinkingPhase, setThinkingPhase] = useState(0)  // 等 DS 回复时：0 默认/1 >3s/2 >8s
+
+  // sending 满 3s / 8s 换 thinking 文案，缓解等待焦虑
+  useEffect(() => {
+    if (!sending) { setThinkingPhase(0); return }
+    const t1 = setTimeout(() => setThinkingPhase(1), 3000)
+    const t2 = setTimeout(() => setThinkingPhase(2), 8000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [sending])
 
   function handleModeChange(next) {
     if (next === mode) return
@@ -150,6 +169,43 @@ export default function ChatPage() {
         <div style={{ position: 'relative', zIndex: 1 }}>
           <StoatHalf view="full" state={stoatState} width={STOAT_WIDTH} />
         </div>
+
+        {/* thinking 动态文案：等 DS 超过 3s 才显，缓解"是不是卡住了"焦虑 */}
+        {sending && thinkingPhase > 0 && (
+          <div style={{
+            fontSize: 12,
+            color: 'var(--color-subtle)',
+            zIndex: 1,
+            marginTop: -4,
+            opacity: 0.8,
+          }}>
+            {thinkingPhase === 1
+              ? (mode === 'plan' ? '在翻你任务栏...' : '在想怎么说...')
+              : '让小白慢慢想...'}
+          </div>
+        )}
+
+        {/* 闲聊模式下用户打出"安排/计划/删/取消..."等词时顺手提示切任务 */}
+        {mode === 'chat' && hasPlanIntent(input) && !sending && (
+          <button
+            type="button"
+            onClick={() => handleModeChange('plan')}
+            style={{
+              marginTop: -4,
+              padding: '5px 12px',
+              borderRadius: 999,
+              border: '1px solid var(--color-primary)',
+              background: 'var(--color-primary-soft)',
+              color: 'var(--color-primary)',
+              fontSize: 12, fontFamily: 'inherit',
+              cursor: 'pointer',
+              zIndex: 1,
+              transition: 'var(--transition) ease-out',
+            }}
+          >
+            切到任务模式 →
+          </button>
+        )}
 
         {/* 你说：堆叠右对齐贴底，新在底老在顶，opacity 渐弱 */}
         {recentUsers.length > 0 && (

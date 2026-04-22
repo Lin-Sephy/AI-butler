@@ -5,7 +5,7 @@
  * 聊天/数据/我的 仍为占位骨架，第 2-5 步做。
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from './contexts/AuthContext.jsx'
 import TasksPage from './pages/TasksPage.jsx'
 import ChatPage from './pages/ChatPage.jsx'
@@ -17,12 +17,26 @@ const TABS = [
   { key: 'me',     label: '我的' },
 ]
 
+const WAKE_MESSAGES = [
+  '正在唤醒小白……',
+  '小白好像在睡觉，再等等...',
+  '服务器刚睡醒正在洗脸...',
+]
+
 export default function App() {
   const { user, loading, error } = useAuth()
   const [tab, setTab] = useState('tasks')
+  const [wakeStage, setWakeStage] = useState(0)
+
+  useEffect(() => {
+    if (!loading) { setWakeStage(0); return }
+    const t1 = setTimeout(() => setWakeStage(1), 5000)
+    const t2 = setTimeout(() => setWakeStage(2), 15000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [loading])
 
   if (loading) {
-    return <CenterMessage>正在唤醒小白……</CenterMessage>
+    return <CenterMessage>{WAKE_MESSAGES[wakeStage]}</CenterMessage>
   }
 
   if (error) {
