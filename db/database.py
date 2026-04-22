@@ -457,15 +457,30 @@ def find_projects_matching_keyword(user_id: str, text: str) -> list[dict]:
 
 # ---- 最近 N 天任务查询（给 function calling 和第 4 页统计共用） ----
 
+# abandoned 任务查询保留天数：超过就不在"最近 N 天"结果里出现，避免陈年旧账污染 DS 视野
+ABANDONED_RETENTION_DAYS = 2
+
+
 def get_tasks_recent(user_id: str, days: int = 7) -> list[dict]:
-    """返回最近 N 天内 created_at 的任务。"""
-    since = (now_cn() - timedelta(days=days)).isoformat()
-    return _get("task", {
+    """返回最近 N 天内 created_at 的任务。
+
+    abandoned 状态的任务额外受 ABANDONED_RETENTION_DAYS 过滤：
+    completed_at 超过 N 天的不返回，让 DS 的 query_tasks / query_schedule 视野只看到近期真实活动。
+    """
+    now = now_cn()
+    since = (now - timedelta(days=days)).isoformat()
+    abandoned_cutoff = (now - timedelta(days=ABANDONED_RETENTION_DAYS)).isoformat()
+    tasks = _get("task", {
         "user_id": f"eq.{user_id}",
         "created_at": f"gte.{since}",
         "select": "*",
         "order": "created_at.desc",
     })
+    return [
+        t for t in tasks
+        if t.get("status") != "abandoned"
+        or (t.get("completed_at") or "") >= abandoned_cutoff
+    ]
 
 
 def get_tasks_by_project(user_id: str, project_id: int) -> list[dict]:

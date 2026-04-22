@@ -5,7 +5,11 @@ v2 多用户改造（2026-04-15）：所有公开函数第一个参数都是 use
 不带 user_id 过滤理论上可能跨用户操作（虽然 RLS 是 backstop，但代码层不能依赖它）。
 """
 
+from datetime import timedelta
 from db.database import _get, _post, _patch, _delete, now_cn
+
+# idle 任务留存天数：超过就自动结转为 abandoned，避免老 idle 堆积在今日视图里
+STALE_IDLE_DAYS = 2
 
 
 def _get_task_by_id(user_id: str, task_id: int) -> dict:
@@ -109,8 +113,30 @@ def update_task_keyword(user_id: str, task_id: int, keyword: str) -> dict:
     return _get_task_by_id(user_id, task_id)
 
 
+def _sweep_stale_idle_tasks(user_id: str) -> None:
+    """把超过 STALE_IDLE_DAYS 天前创建仍在 idle 的任务结转为 abandoned。
+
+    静默失败——sweep 不该影响主流程，网络/DB 抖动时下次再 sweep 即可。
+    """
+    now = now_cn()
+    cutoff = (now - timedelta(days=STALE_IDLE_DAYS)).isoformat()
+    try:
+        _patch("task", {
+            "user_id": f"eq.{user_id}",
+            "status": "eq.idle",
+            "created_at": f"lt.{cutoff}",
+        }, {"status": "abandoned", "completed_at": now.isoformat()}, return_row=False)
+    except Exception:
+        pass
+
+
 def get_today_tasks(user_id: str) -> list[dict]:
-    """获取今天的所有任务（不含已放弃），按创建时间倒序。"""
+    """获取今天的所有任务（不含已放弃），按创建时间倒序。
+
+    读前先 sweep 一次陈年 idle——让今日视图永远只看到当天活跃任务，
+    不被昨天或更早遗留的未做任务污染。
+    """
+    _sweep_stale_idle_tasks(user_id)
     today_start = now_cn().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     return _get("task", {
         "user_id": f"eq.{user_id}",
