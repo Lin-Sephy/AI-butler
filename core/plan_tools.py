@@ -14,9 +14,6 @@ from datetime import datetime
 
 from db.database import (
     get_tasks_recent,
-    list_projects,
-    get_project_by_name,
-    get_tasks_by_project,
     get_daily_routine,
     now_cn,
 )
@@ -87,23 +84,6 @@ PLAN_MODE_TOOLS = [
             "name": "query_stats",
             "description": "查用户的专注统计（最常专注的时段、平均时长、完成率）",
             "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "query_project",
-            "description": "查某个项目的摘要和关联任务",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "项目名称，如'毕业论文'、'考研'",
-                    },
-                },
-                "required": ["name"],
-            },
         },
     },
     {
@@ -183,11 +163,6 @@ PLAN_MODE_TOOLS = [
                                     "type": "integer",
                                     "description": "建议时长（分钟），不确定填 null",
                                 },
-                                "task_type": {
-                                    "type": "string",
-                                    "enum": ["work", "rest"],
-                                    "description": "work=工作/学习，rest=休息/放松",
-                                },
                                 "scheduled_at": {
                                     "type": "string",
                                     "description": (
@@ -227,13 +202,11 @@ def _tool_query_tasks(user_id: str, args: dict) -> dict:
             "task_id": t.get("id"),
             "keyword": t.get("keyword"),
             "status": t.get("status"),
-            "task_type": t.get("task_type"),
             "created_at": t.get("created_at"),
             "started_at": t.get("started_at"),
             "completed_at": t.get("completed_at"),
             "scheduled_at": t.get("scheduled_at"),
             "minutes": t.get("default_minutes"),
-            "project_id": t.get("project_id"),
         }
         for t in tasks
     ]
@@ -290,51 +263,8 @@ def _tool_query_stats(user_id: str, args: dict) -> dict:
     }
 
 
-def _tool_query_project(user_id: str, args: dict) -> dict:
-    name = args.get("name", "").strip()
-    if not name:
-        return {"error": "需要传项目名（name 参数）"}
-
-    # 先精确匹配
-    project = get_project_by_name(user_id, name)
-    if not project:
-        # 再做一次子串匹配兜底
-        all_projects = list_projects(user_id)
-        hits = [p for p in all_projects if name in p["name"] or p["name"] in name]
-        if not hits:
-            available = [p["name"] for p in all_projects]
-            return {
-                "error": f"没找到项目'{name}'",
-                "铲屎官建过的项目": available or "（还没建过）",
-            }
-        project = hits[0]
-
-    tasks = get_tasks_by_project(user_id, project["id"])
-    related = [
-        {
-            "keyword": t.get("keyword"),
-            "status": t.get("status"),
-            "created_at": t.get("created_at"),
-            "completed_at": t.get("completed_at"),
-        }
-        for t in tasks[:20]  # 最近 20 条够 DS 看了
-    ]
-
-    return {
-        "name": project.get("name"),
-        "keywords": project.get("keywords") or [],
-        "summary": project.get("summary") or "（还没有摘要）",
-        "updated_at": project.get("updated_at"),
-        "关联任务": related,
-    }
-
-
 def _tool_query_schedule(user_id: str, args: dict) -> dict:
-    """今日事件（scheduled_at 在今天的任务）+ 用户日常作息。
-
-    任意 scheduled_at 落在今天的 task 都算"今日事件"——不限 task_type，
-    因为 v5.0 DB 的 task_type 只有 work/rest 没有专门的 event 类型。
-    """
+    """今日事件（scheduled_at 在今天的任务）+ 用户日常作息。"""
     today = now_cn().strftime("%Y-%m-%d")
 
     tasks = get_tasks_recent(user_id, days=3)
@@ -345,7 +275,6 @@ def _tool_query_schedule(user_id: str, args: dict) -> dict:
             today_events.append({
                 "time": scheduled,
                 "keyword": t.get("keyword"),
-                "task_type": t.get("task_type"),
             })
 
     routine = get_daily_routine(user_id)
@@ -429,10 +358,6 @@ def _tool_create_tasks(user_id: str, args: dict) -> dict:
             failed.append({"task": item, "reason": "缺 keyword"})
             continue
 
-        task_type = item.get("task_type") or "work"
-        if task_type not in ("work", "rest"):
-            task_type = "work"
-
         minutes = item.get("minutes")
         if minutes is not None:
             try:
@@ -456,7 +381,6 @@ def _tool_create_tasks(user_id: str, args: dict) -> dict:
                     keyword=keyword, scheduled_at=scheduled_iso, combo="",
                     energy_level=energy_level,
                     suggested_minutes=minutes,
-                    task_type=task_type,
                 )
             else:
                 row = _create_task_impl(
@@ -464,14 +388,12 @@ def _tool_create_tasks(user_id: str, args: dict) -> dict:
                     keyword=keyword, combo="",
                     energy_level=energy_level,
                     suggested_minutes=minutes,
-                    task_type=task_type,
                     auto_start=False,
                 )
             created.append({
                 "task_id": row.get("id"),
                 "keyword": row.get("keyword"),
                 "minutes": row.get("default_minutes"),
-                "task_type": row.get("task_type"),
                 "scheduled_at": row.get("scheduled_at"),
                 "status": row.get("status"),
             })
@@ -492,7 +414,6 @@ def _tool_create_tasks(user_id: str, args: dict) -> dict:
 _TOOL_IMPLS = {
     "query_tasks": _tool_query_tasks,
     "query_stats": _tool_query_stats,
-    "query_project": _tool_query_project,
     "query_schedule": _tool_query_schedule,
     "delete_task": _tool_delete_task,
     "delete_tasks": _tool_delete_tasks,

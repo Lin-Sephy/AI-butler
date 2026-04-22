@@ -7,7 +7,6 @@ export default function NewTaskModal({ onSubmit, onClose }) {
   const [minutes, setMinutes] = useState(25)
   const [customMinutes, setCustomMinutes] = useState('')
   const [useCustom, setUseCustom] = useState(false)
-  const [taskType, setTaskType] = useState('work')
   const [submitting, setSubmitting] = useState(false)
 
   async function handleSubmit(e) {
@@ -19,7 +18,6 @@ export default function NewTaskModal({ onSubmit, onClose }) {
       await onSubmit({
         task_keyword: keyword.trim(),
         suggested_minutes: finalMinutes,
-        task_type: taskType,
       })
       onClose()
     } finally {
@@ -116,30 +114,7 @@ export default function NewTaskModal({ onSubmit, onClose }) {
           </div>
         </div>
 
-        {/* Type */}
-        <label style={{ fontSize: 13, color: 'var(--color-subtle)', display: 'block', marginBottom: 6 }}>
-          类型
-        </label>
-        <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-          {['work', 'rest'].map(t => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTaskType(t)}
-              style={{
-                padding: '8px 20px',
-                borderRadius: 'var(--radius)',
-                border: `1px solid ${t === taskType ? 'var(--color-primary)' : 'var(--color-line)'}`,
-                background: t === taskType ? 'var(--color-primary-soft)' : 'transparent',
-                color: t === taskType ? 'var(--color-primary)' : 'var(--color-subtle)',
-                fontSize: 14, fontFamily: 'inherit',
-                cursor: 'pointer',
-              }}
-            >
-              {t === 'work' ? '专注' : '休息'}
-            </button>
-          ))}
-        </div>
+        <div style={{ marginBottom: 24 }} />
 
         {/* Submit / Cancel */}
         <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>

@@ -36,7 +36,7 @@ export async function loadHistory(sessionId) {
  * @returns {Promise<{
  *   reply: string,
  *   confirmed: boolean,         // 计划模式下 DS 是否判定用户定稿
- *   created_tasks: Array<{task_id, keyword, minutes, task_type}>,  // 本轮 DS 写入的任务
+ *   created_tasks: Array<{task_id, keyword, minutes, scheduled_at, status}>,  // 本轮 DS 写入的任务
  * }>}
  */
 export async function sendMessage({ message, sessionId, mode = 'chat' }) {

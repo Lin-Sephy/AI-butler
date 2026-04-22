@@ -134,7 +134,6 @@ def main() -> None:
         json={
             "task_keyword": "smoke 测试任务",
             "suggested_minutes": 25,
-            "task_type": "work",
         },
     )
     if r.status_code != 200:

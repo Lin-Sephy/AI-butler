@@ -11,14 +11,13 @@
  * 底部只有"关闭"按钮——数据已落库，没有"全部记录"动作可做。
  *
  * initialTasks 结构（从 ChatContext.lastCreatedTasks 来）：
- *   [{ task_id, keyword, minutes, task_type }, ...]
+ *   [{ task_id, keyword, minutes, scheduled_at, status }, ...]
  */
 
 import { useState } from 'react'
 import { apiFetch } from '../lib/api.js'
 
-const WORK_MINUTES = [25, 45, 60, 90]
-const REST_MINUTES = [5, 10, 15, 25]
+const MINUTE_OPTIONS = [25, 45, 60, 90]
 
 export default function PlanConfirmModal({ initialTasks, onClose }) {
   const [tasks, setTasks] = useState(initialTasks || [])
@@ -55,9 +54,6 @@ export default function PlanConfirmModal({ initialTasks, onClose }) {
       setError(`改时长失败：${e.message}`)
     }
   }
-
-  // 后端 task_type 改动还没开 endpoint。先禁用 UI 切换避免"关弹窗再打开就回去"的数据不一致。
-  // 要真支持改类型再加 POST /api/task/{id}/type 端点 + 这里解锁
 
   async function handleDelete(task) {
     const prev = tasks
@@ -181,10 +177,9 @@ export default function PlanConfirmModal({ initialTasks, onClose }) {
 // ════════════ 单行任务 ════════════
 
 function TaskRow({ task, onChangeKeyword, onChangeMinutes, onDelete }) {
-  const { keyword, minutes, task_type } = task
+  const { keyword, minutes } = task
   const [localKw, setLocalKw] = useState(keyword || '')
-  const minuteOptions = task_type === 'rest' ? REST_MINUTES : WORK_MINUTES
-  const isCustom = minutes != null && !minuteOptions.includes(minutes)
+  const isCustom = minutes != null && !MINUTE_OPTIONS.includes(minutes)
 
   return (
     <div style={{
@@ -231,9 +226,9 @@ function TaskRow({ task, onChangeKeyword, onChangeMinutes, onDelete }) {
         </button>
       </div>
 
-      {/* 第二行：时长 chip + 自定义 + work/rest */}
+      {/* 第二行：时长 chip + 自定义 */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-        {minuteOptions.map(m => (
+        {MINUTE_OPTIONS.map(m => (
           <MiniChip
             key={m}
             selected={minutes === m}
@@ -265,24 +260,6 @@ function TaskRow({ task, onChangeKeyword, onChangeMinutes, onDelete }) {
             outline: 'none',
           }}
         />
-
-        <span style={{ width: 12 }} />
-
-        {/* work/rest 是只读——后端还没开改类型的 endpoint，先不让用户点
-            避免"关弹窗再打开就回去"的数据不一致 */}
-        <span
-          title="类型在任务页改"
-          style={{
-            padding: '4px 10px',
-            borderRadius: 999,
-            border: '1px solid var(--color-line)',
-            background: 'var(--color-base)',
-            color: 'var(--color-subtle)',
-            fontSize: 12, fontFamily: "'Inter', system-ui, sans-serif",
-          }}
-        >
-          {task_type === 'rest' ? '休息' : '专注'}
-        </span>
       </div>
     </div>
   )
