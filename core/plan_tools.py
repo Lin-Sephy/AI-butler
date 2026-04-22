@@ -8,6 +8,7 @@ v5.0 架构（见开工文档）：
 """
 import json
 import logging
+import re
 from collections import Counter
 from datetime import datetime
 
@@ -22,7 +23,41 @@ from db.database import (
 from core.task_manager import (
     delete_task as _delete_task_impl,
     create_task as _create_task_impl,
+    create_scheduled_task as _create_scheduled_task_impl,
 )
+
+
+def _parse_scheduled_at(raw) -> str | None:
+    """把 DS 传的 scheduled_at 解析成 ISO 字符串。
+
+    接受：
+      - 完整 ISO 8601（含/不含秒、含/不含时区）
+      - 'YYYY-MM-DD HH:MM[:SS]'（'/' 分隔也行）
+      - 'HH:MM'（按今天补日期）
+    解析失败返 None，调用方报错让 DS 改。
+    """
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+
+    # 纯 HH:MM → 今天
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", s)
+    if m:
+        h, mm = int(m.group(1)), int(m.group(2))
+        if 0 <= h < 24 and 0 <= mm < 60:
+            today = now_cn().strftime("%Y-%m-%d")
+            return f"{today}T{h:02d}:{mm:02d}:00"
+        return None
+
+    # 常见变体归一化成 ISO
+    normalized = s.replace("/", "-").replace(" ", "T", 1)
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    return dt.isoformat()
 
 
 # ════════════════════════════════════════════════════════════
@@ -128,7 +163,8 @@ PLAN_MODE_TOOLS = [
             "description": (
                 "批量创建任务，一次写入任务栏。用户和你讨论完计划、表示要记下来时调用。"
                 "一次传一个 tasks 数组，包含多条任务；不要一条一条调。"
-                "所有任务会以 idle（待完成）状态写入，不自动开始。"
+                "不传 scheduled_at 的任务以 idle（待完成）状态写入、不自动开始；"
+                "传了 scheduled_at 的任务变成 scheduled（预定）状态，到期会提醒用户。"
             ),
             "parameters": {
                 "type": "object",
@@ -151,6 +187,14 @@ PLAN_MODE_TOOLS = [
                                     "type": "string",
                                     "enum": ["work", "rest"],
                                     "description": "work=工作/学习，rest=休息/放松",
+                                },
+                                "scheduled_at": {
+                                    "type": "string",
+                                    "description": (
+                                        "用户指定了时间（如'明天早上 9 点'、'周五 14:00'）时填。"
+                                        "格式用 'YYYY-MM-DD HH:MM'（推荐，用 user message 里的当前时间推算）。"
+                                        "只填 'HH:MM' 会按今天算。没指定时间就别填。"
+                                    ),
                                 },
                             },
                             "required": ["keyword"],
@@ -362,7 +406,11 @@ def _tool_delete_tasks(user_id: str, args: dict) -> dict:
 
 
 def _tool_create_tasks(user_id: str, args: dict) -> dict:
-    """批量创建任务（一次多条，省轮数）。所有任务 idle 状态，不自动开始。"""
+    """批量创建任务（一次多条，省轮数）。
+
+    - 无 scheduled_at：写成 idle（待完成），不自动开始
+    - 有 scheduled_at：写成 scheduled（预定），到期提醒
+    """
     raw = args.get("tasks")
     if not isinstance(raw, list) or not raw:
         return {"error": "tasks 必须是非空任务列表"}
@@ -392,20 +440,40 @@ def _tool_create_tasks(user_id: str, args: dict) -> dict:
             except (TypeError, ValueError):
                 minutes = None
 
+        scheduled_raw = item.get("scheduled_at")
+        scheduled_iso = _parse_scheduled_at(scheduled_raw) if scheduled_raw else None
+        if scheduled_raw and not scheduled_iso:
+            failed.append({
+                "keyword": keyword,
+                "reason": f"scheduled_at 格式不对：{scheduled_raw!r}（请用 'YYYY-MM-DD HH:MM'）",
+            })
+            continue
+
         try:
-            row = _create_task_impl(
-                user_id,
-                keyword=keyword, combo="",
-                energy_level=energy_level,
-                suggested_minutes=minutes,
-                task_type=task_type,
-                auto_start=False,
-            )
+            if scheduled_iso:
+                row = _create_scheduled_task_impl(
+                    user_id,
+                    keyword=keyword, scheduled_at=scheduled_iso, combo="",
+                    energy_level=energy_level,
+                    suggested_minutes=minutes,
+                    task_type=task_type,
+                )
+            else:
+                row = _create_task_impl(
+                    user_id,
+                    keyword=keyword, combo="",
+                    energy_level=energy_level,
+                    suggested_minutes=minutes,
+                    task_type=task_type,
+                    auto_start=False,
+                )
             created.append({
                 "task_id": row.get("id"),
                 "keyword": row.get("keyword"),
                 "minutes": row.get("default_minutes"),
                 "task_type": row.get("task_type"),
+                "scheduled_at": row.get("scheduled_at"),
+                "status": row.get("status"),
             })
         except Exception as e:
             logging.error(f"[PlanTool] create_tasks({keyword!r}) 失败: {type(e).__name__}: {e}")

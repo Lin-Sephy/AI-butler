@@ -32,6 +32,7 @@ DRAFT_EXPIRE_DAYS = 7       # 初步印象 7 天没触发就删
 CONFIRMED_DECAY_DAYS = 14   # 深入印象 14 天没触发就降级
 HIGH_FREQ_THRESHOLD = 10    # 触发 10 次以上，衰减期延长
 HIGH_FREQ_DECAY_DAYS = 30
+MAX_IMPRESSIONS_IN_PROMPT = 15  # 传给聊天 DS 的印象上限（按 updated_at 最近取），防老用户 token 膨胀 + attention 稀释
 
 # ---- 提取 Prompt ----
 
@@ -102,8 +103,13 @@ def get_confirmed_impressions_text(user_id: str, ai_memo_raw: str | None = None)
     """获取印象的可读文本，传给聊天 prompt。confirmed 和 draft 都传，标注区分。
 
     ai_memo_raw：调用方已经有原始字符串时可传入，避免重复查库。
+    按 updated_at 降序取最近 MAX_IMPRESSIONS_IN_PROMPT 条——老用户累积越多越不该全塞。
     """
     impressions = _get_impressions(user_id, ai_memo_raw=ai_memo_raw)
+    if not impressions:
+        return ""
+    impressions.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+    impressions = impressions[:MAX_IMPRESSIONS_IN_PROMPT]
     confirmed = [imp for imp in impressions if imp.get("level") == "confirmed"]
     drafts = [imp for imp in impressions if imp.get("level") == "draft"]
     if not confirmed and not drafts:

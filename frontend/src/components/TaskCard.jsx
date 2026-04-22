@@ -28,6 +28,15 @@ const STATUS_CONFIG = {
       border: '1px solid var(--color-accent)',
     },
   },
+  scheduled: {
+    dotStyle: { background: 'transparent', border: '2px solid var(--color-primary)' },
+    chipText: '预定',
+    chipStyle: {
+      background: 'var(--color-primary-soft)',
+      color: 'var(--color-primary)',
+      border: '1px solid var(--color-primary)',
+    },
+  },
   completed: {
     dotStyle: { background: 'var(--color-primary)' },
     chipText: '已完成',
@@ -40,6 +49,13 @@ const STATUS_CONFIG = {
 }
 
 const TYPE_LABEL = { work: 'work', rest: 'rest' }
+
+function formatScheduledTime(iso) {
+  if (!iso) return ''
+  // '2026-04-22T19:16:00' / '2026-04-22T19:16:00+08:00' 都支持，只取 HH:MM
+  const m = iso.match(/T(\d{2}):(\d{2})/)
+  return m ? `${m[1]}:${m[2]}` : ''
+}
 
 export default function TaskCard({ task, onStart, onPause, onResume, onComplete, onAbandon, onDelete }) {
   const [busy, setBusy] = useState(false)
@@ -90,6 +106,9 @@ export default function TaskCard({ task, onStart, onPause, onResume, onComplete,
           display: 'flex', gap: 10, alignItems: 'center',
           fontFamily: "'Inter', system-ui, sans-serif",
         }}>
+          {status === 'scheduled' && task.scheduled_at && (
+            <span>{formatScheduledTime(task.scheduled_at)}</span>
+          )}
           {task.default_minutes && <span>{task.default_minutes} min</span>}
           <span style={{
             padding: '2px 10px',
@@ -104,7 +123,7 @@ export default function TaskCard({ task, onStart, onPause, onResume, onComplete,
 
       {/* Actions */}
       <div style={{ display: 'flex', gap: 4 }}>
-        {status === 'idle' && (
+        {(status === 'idle' || status === 'scheduled') && (
           <>
             <ActionBtn label="开始" onClick={() => act(onStart)} disabled={busy} />
             <ActionBtn label="删除" onClick={() => act(onDelete)} disabled={busy} subtle />
