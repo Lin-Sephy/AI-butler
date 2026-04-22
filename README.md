@@ -19,14 +19,6 @@ npm run dev
 
 浏览器访问 `http://localhost:5173`。
 
-### Streamlit MVP（main 分支）
-
-```
-streamlit run app.py
-```
-
-已部署到 Streamlit Cloud，本地跑切 main 分支。`webapp-migration` 分支上 `app.py` 的 DB 层已改 Supabase，本地跑不起来。
-
 ### 后端 API
 
 - **SQL 变更**（表结构 / RLS 策略）→ Supabase Dashboard 的 SQL Editor 粘贴执行
@@ -36,7 +28,6 @@ streamlit run app.py
 
 ## 目录速览
 
-- `app.py` — Streamlit MVP 主入口
 - `api.py` — FastAPI 应用主入口
 - `frontend/` — React + Vite 骨架（v2 前端）
 - `core/` — 业务逻辑模块

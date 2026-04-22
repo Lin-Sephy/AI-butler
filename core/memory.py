@@ -78,9 +78,12 @@ EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印
 
 # ---- 印象存取 ----
 
-def _get_impressions(user_id: str) -> list[dict]:
-    """从 ai_memo 读取印象列表。兼容旧格式（纯文本直接丢弃）。"""
-    raw = get_ai_memo(user_id)
+def _get_impressions(user_id: str, ai_memo_raw: str | None = None) -> list[dict]:
+    """从 ai_memo 读取印象列表。兼容旧格式（纯文本直接丢弃）。
+
+    ai_memo_raw：调用方已经有原始字符串时可传入，避免重复查库。
+    """
+    raw = ai_memo_raw if ai_memo_raw is not None else get_ai_memo(user_id)
     if not raw:
         return []
     try:
@@ -97,9 +100,12 @@ def _save_impressions(user_id: str, impressions: list[dict]) -> None:
     save_ai_memo(user_id, json.dumps({"impressions": impressions}, ensure_ascii=False))
 
 
-def get_confirmed_impressions_text(user_id: str) -> str:
-    """获取印象的可读文本，传给聊天 prompt。confirmed 和 draft 都传，标注区分。"""
-    impressions = _get_impressions(user_id)
+def get_confirmed_impressions_text(user_id: str, ai_memo_raw: str | None = None) -> str:
+    """获取印象的可读文本，传给聊天 prompt。confirmed 和 draft 都传，标注区分。
+
+    ai_memo_raw：调用方已经有原始字符串时可传入，避免重复查库。
+    """
+    impressions = _get_impressions(user_id, ai_memo_raw=ai_memo_raw)
     confirmed = [imp for imp in impressions if imp.get("level") == "confirmed"]
     drafts = [imp for imp in impressions if imp.get("level") == "draft"]
     if not confirmed and not drafts:
@@ -376,10 +382,14 @@ def _update_daily_memo(user_id: str, daily_data: dict) -> None:
     save_daily_memo(user_id, json.dumps(current, ensure_ascii=False))
 
 
-def get_filtered_daily_memo(user_id: str) -> str:
-    """获取过滤后的每日记忆，返回可读文本。"""
+def get_filtered_daily_memo(user_id: str, daily_memo_raw: str | None = None) -> str:
+    """获取过滤后的每日记忆，返回可读文本。
+
+    daily_memo_raw：调用方已经有原始字符串时可传入，避免重复查库。
+    """
+    raw = daily_memo_raw if daily_memo_raw is not None else get_daily_memo(user_id)
     try:
-        current = json.loads(get_daily_memo(user_id))
+        current = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return ""
 

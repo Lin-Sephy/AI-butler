@@ -8,8 +8,45 @@ v2 多用户改造（2026-04-15）：所有公开函数第一个参数都是 use
 
 import httpx
 import json
+import logging
+import time
 from datetime import datetime, timedelta, timezone
 import config
+
+# Supabase 请求超时和重试配置
+# 本地网络到 Singapore 区偶发 SSL handshake 超时（_ssl.c:1063），
+# 用 httpx.Client 持久连接复用 TLS session，大幅减少每次握手开销
+_TIMEOUT = 15
+_MAX_RETRIES = 3      # 含首次，即首次 + 2 次重试
+_RETRY_DELAY = 0.4    # 重试前短暂等待，避开 burst 失败
+
+# 触发重试的网络层异常（超时 / 连接错误 / TLS 握手失败）
+_RETRYABLE = (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError, httpx.RemoteProtocolError)
+
+# 全局持久化 Client，复用连接池和 TLS session——
+# 第一次建立 TLS 握手后，后续请求走 keep-alive，延迟从 ~500ms 降到 ~20ms
+_CLIENT = httpx.Client(
+    timeout=_TIMEOUT,
+    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=60),
+)
+
+
+def _with_retry(method: str, url: str, **kwargs) -> httpx.Response:
+    """带重试的 httpx 调用。只重试网络层短暂异常，不重试 4xx/5xx 响应。"""
+    last_exc = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return _CLIENT.request(method, url, **kwargs)
+        except _RETRYABLE as e:
+            last_exc = e
+            if attempt < _MAX_RETRIES - 1:
+                logging.warning(
+                    f"[DB] {method} {url.rsplit('/', 1)[-1]} 失败 {type(e).__name__}，"
+                    f"{_RETRY_DELAY}s 后重试（剩 {_MAX_RETRIES - attempt - 1} 次）"
+                )
+                time.sleep(_RETRY_DELAY)
+    assert last_exc is not None
+    raise last_exc
 
 # 北京时间 UTC+8
 _CN_TZ = timezone(timedelta(hours=8))
@@ -32,7 +69,7 @@ _HEADERS = {
 
 def _get(table: str, params: dict | None = None) -> list[dict]:
     """GET 请求，返回行列表。"""
-    resp = httpx.get(f"{_BASE_URL}/{table}", headers=_HEADERS, params=params or {}, timeout=10)
+    resp = _with_retry("GET", f"{_BASE_URL}/{table}", headers=_HEADERS, params=params or {})
     resp.raise_for_status()
     return resp.json()
 
@@ -42,7 +79,7 @@ def _post(table: str, data: dict, return_row: bool = True) -> dict | None:
     headers = dict(_HEADERS)
     if return_row:
         headers["Prefer"] = "return=representation"
-    resp = httpx.post(f"{_BASE_URL}/{table}", headers=headers, json=data, timeout=10)
+    resp = _with_retry("POST", f"{_BASE_URL}/{table}", headers=headers, json=data)
     resp.raise_for_status()
     if return_row:
         rows = resp.json()
@@ -55,7 +92,7 @@ def _patch(table: str, params: dict, data: dict, return_row: bool = True) -> dic
     headers = dict(_HEADERS)
     if return_row:
         headers["Prefer"] = "return=representation"
-    resp = httpx.patch(f"{_BASE_URL}/{table}", headers=headers, params=params, json=data, timeout=10)
+    resp = _with_retry("PATCH", f"{_BASE_URL}/{table}", headers=headers, params=params, json=data)
     resp.raise_for_status()
     if return_row:
         rows = resp.json()
@@ -65,7 +102,7 @@ def _patch(table: str, params: dict, data: dict, return_row: bool = True) -> dic
 
 def _delete(table: str, params: dict) -> None:
     """DELETE 请求。"""
-    resp = httpx.delete(f"{_BASE_URL}/{table}", headers=_HEADERS, params=params, timeout=10)
+    resp = _with_retry("DELETE", f"{_BASE_URL}/{table}", headers=_HEADERS, params=params)
     resp.raise_for_status()
 
 
@@ -141,6 +178,75 @@ def get_custom_persona(user_id: str) -> str:
 
 def save_custom_persona(user_id: str, persona: str) -> None:
     _set_profile_field(user_id, "custom_persona", persona)
+
+
+def get_full_profile(user_id: str) -> dict:
+    """一次 SELECT * 拿 user_profile 所有字段，避免 /api/chat 里多次重复读。
+
+    返回字段：companion_name, custom_persona, user_memo, ai_memo, daily_memo,
+              daily_routine, llm_provider, llm_base_url, llm_model, llm_api_key 等。
+              没填写的返回空字符串（非 None）。
+    """
+    rows = _get("user_profile", {
+        "user_id": f"eq.{user_id}",
+        "select": "*",
+    })
+    if not rows:
+        return {}
+    row = rows[0]
+    # 统一把 None 归一成空串 / 空 json，调用方少判空
+    return {
+        "companion_name": row.get("companion_name") or "小白",
+        "custom_persona": row.get("custom_persona") or "",
+        "user_memo": row.get("user_memo") or "",
+        "ai_memo": row.get("ai_memo") or "",
+        "daily_memo": row.get("daily_memo") or "{}",
+        "daily_routine": row.get("daily_routine") or "",
+        "llm_provider": row.get("llm_provider") or "",
+        "llm_base_url": row.get("llm_base_url") or "",
+        "llm_model": row.get("llm_model") or "",
+        "llm_api_key": row.get("llm_api_key") or "",
+    }
+
+
+def get_llm_config(user_id: str) -> dict:
+    """读用户自带 LLM 配置（BYOK）。返回 dict，字段为空表示用户没设。
+
+    调用方判断：如果 api_key/base_url/model 都有值 → 用用户配置；否则回退默认 DeepSeek。
+    """
+    rows = _get("user_profile", {
+        "user_id": f"eq.{user_id}",
+        "select": "llm_provider,llm_base_url,llm_model,llm_api_key",
+    })
+    if not rows:
+        return {"provider": "", "base_url": "", "model": "", "api_key": ""}
+    row = rows[0]
+    return {
+        "provider": row.get("llm_provider") or "",
+        "base_url": row.get("llm_base_url") or "",
+        "model": row.get("llm_model") or "",
+        "api_key": row.get("llm_api_key") or "",
+    }
+
+
+def save_llm_config(user_id: str, provider: str, base_url: str, model: str,
+                    api_key: str | None = None) -> None:
+    """保存用户 LLM 配置。api_key=None 表示不更新（保留原值）；""（空串）表示清空。"""
+    data = {
+        "llm_provider": provider,
+        "llm_base_url": base_url,
+        "llm_model": model,
+    }
+    if api_key is not None:
+        data["llm_api_key"] = api_key
+
+    # upsert：没 row 就插，有就 patch
+    existing = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "user_id"})
+    if existing:
+        _patch("user_profile", {"user_id": f"eq.{user_id}"}, data, return_row=False)
+    else:
+        data["user_id"] = user_id
+        _post("user_profile", data, return_row=False)
 
 
 def get_companion_profile(user_id: str) -> dict:

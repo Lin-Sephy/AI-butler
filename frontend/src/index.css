@@ -14,3 +14,10 @@ body {
   color: var(--color-text);
   background: var(--color-base);
 }
+
+@keyframes modeHintFade {
+  0%   { opacity: 0; transform: translate(-50%, -4px); }
+  15%  { opacity: 1; transform: translate(-50%, 0); }
+  80%  { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -4px); }
+}

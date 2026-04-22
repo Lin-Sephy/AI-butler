@@ -6,9 +6,6 @@
 - check_energy_drift 改用信号里的 energy_impression
 """
 
-import random
-
-
 # ---- 任务触发判断 ----
 
 def should_trigger_task(signal: dict, energy_level: int, task_board: list[dict]) -> bool:
@@ -51,26 +48,6 @@ def should_trigger_task(signal: dict, energy_level: int, task_board: list[dict])
 
     # 其他情况 → 不触发
     return False
-
-
-def find_matching_task(mentioned_activity: str, task_board: list[dict]) -> dict | None:
-    """在任务栏中查找与用户提到的事项匹配的任务。
-
-    用于"做完 xx 了"场景：自动关联到进行中的任务。
-    """
-    if not mentioned_activity or not task_board:
-        return None
-
-    activity = mentioned_activity.lower()
-    for task in task_board:
-        keyword = (task.get("keyword") or "").lower()
-        if not keyword:
-            continue
-        # 简单匹配：包含关系
-        if activity in keyword or keyword in activity:
-            return task
-
-    return None
 
 
 # ---- 精力规则（守门校验用） ----
@@ -152,18 +129,3 @@ def should_show_action_buttons(task_response: dict) -> bool:
     """任务推荐给出了具体行动关键词时展示 开始/换一个 按钮。"""
     task_kw = task_response.get("task_keyword")
     return bool(task_kw and str(task_kw).strip())
-
-
-# ---- "换一个"追问消息池 ----
-
-FOLLOW_UP_MESSAGES = [
-    "没关系，是什么让你不想做这个？",
-    "好的，跟我说说你现在更想做什么？",
-    "不想做就不做。你现在是累了想休息，还是想换件别的事？",
-    "收到，那你现在最想做的事是什么？不管是什么都可以说。",
-]
-
-
-def get_follow_up() -> str:
-    """获取一条随机追问消息。"""
-    return random.choice(FOLLOW_UP_MESSAGES)

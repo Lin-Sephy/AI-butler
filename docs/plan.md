@@ -363,6 +363,23 @@
 
 - ❌ **v5.0 砍了**，不再做精力档位选择、偏差检测、快捷确认按钮等任何精力 UI
 
+### v5.1 方向（2026-04-21 测试 v5 时新发现，backlog）
+
+- ⏳ **时间轴视图（对标"精力快充"01 图）**：任务页加时间轴模式——左侧时间刻度 + 右侧按 scheduled_at 排列的时间段卡片。见 `docs/references/竞品/精力快充/01_精力时间轴_时间栏下拉.jpg`
+- ⏳ **`/api/task/record` 扩展接收 `scheduled_at` 和 `project_id`**（后端，前置依赖）：现在 record 端点只接 keyword/minutes/task_type，计划模式提取出的开始时间和项目归属写不进去；时间轴视图必须要先把 scheduled_at 能落库
+
+### 上线后运维（backlog，非核心，等测完 v5 功能再评估）
+
+- ⏳ **Render 冷启动防护**：免费版 15 分钟无请求会 sleep，第一次访问冷启动 30s，前端 fetch 会超时
+  - 方案 A：`apiFetch` 加统一超时 15s + 首次失败自动重试 1 次
+  - 方案 B：Render 升付费 / cron 每 10 分钟 ping 保活
+  - 触发条件：真实用户反馈打开就转圈 / console 看到 "Failed to fetch" 再做
+- ⏳ SettingsPanel 已有手动"重试"按钮兜底（2026-04-21 加）
+- ⏳ **Supabase 连接根治：换 `httpx.Client()` 持久连接池**（db/database.py）
+  - 当前已有重试兜底（2026-04-22 加），`_TIMEOUT=15 + _MAX_RETRIES=2`
+  - 但每次请求独立握手 TLS 开销大。换 Client 可复用连接，快且稳
+  - 触发条件：上线 Render 后真实用户有反馈再做；本地测试重试兜底已够
+
 ---
 
 

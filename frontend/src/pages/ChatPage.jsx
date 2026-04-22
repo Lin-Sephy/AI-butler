@@ -17,16 +17,31 @@ import { useState, useRef, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext.jsx'
 import StoatHalf from '../components/StoatHalf.jsx'
 import ChatBubble from '../components/ChatBubble.jsx'
+import SettingsPanel from '../components/SettingsPanel.jsx'
+import PlanConfirmModal from '../components/PlanConfirmModal.jsx'
 
 const STOAT_WIDTH = 220
-const BUBBLE_MAX_LEN = 100   // 超过截断 + "更多"
+const BUBBLE_MAX_LEN = 100      // 小白气泡：超过截断 + "更多"
+const USER_BUBBLE_MAX_LEN = 50  // 用户气泡：更短（防堆高度挡白鼬）
 
 export default function ChatPage() {
-  const { messages, loading, error, send, resetSession } = useChat()
+  const {
+    messages, loading, error, send, resetSession, mode, setMode,
+    sessionId, planConfirmed, lastCreatedTasks, clearPlanConfirmed,
+  } = useChat()
 
   const [view, setView] = useState('main')   // 'main' | 'history'
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [modeHint, setModeHint] = useState(null)  // 切换提示条文案，1.8s 自动消失
+
+  function handleModeChange(next) {
+    if (next === mode) return
+    setMode(next)
+    setModeHint(next === 'plan' ? '小白切换到任务模式了' : '回到闲聊模式')
+    setTimeout(() => setModeHint(null), 1800)
+  }
 
   async function handleSend(e) {
     e?.preventDefault()
@@ -78,6 +93,7 @@ export default function ChatPage() {
         position: 'sticky', top: 0, zIndex: 10,
         gap: 4,
       }}>
+        <ModeToggle mode={mode} onChange={handleModeChange} />
         <IconBtn title="历史对话" onClick={() => setView('history')}>
           <HistoryIcon />
         </IconBtn>
@@ -86,10 +102,21 @@ export default function ChatPage() {
         }}>
           <CirclePlus />
         </IconBtn>
-        <IconBtn title="设置" onClick={() => alert('设置面板待第 4-5 步做')}>
+        <IconBtn title="设置" onClick={() => setSettingsOpen(true)}>
           <Gear />
         </IconBtn>
       </header>
+
+      {settingsOpen && (
+        <SettingsPanel onClose={() => setSettingsOpen(false)} />
+      )}
+
+      {planConfirmed && lastCreatedTasks.length > 0 && (
+        <PlanConfirmModal
+          initialTasks={lastCreatedTasks}
+          onClose={clearPlanConfirmed}
+        />
+      )}
 
       {/* ─── 主舞台 ─── */}
       <main style={{
@@ -108,6 +135,8 @@ export default function ChatPage() {
           <ErrorBanner>{error}</ErrorBanner>
         )}
 
+        {modeHint && <ModeHintBanner>{modeHint}</ModeHintBanner>}
+
         {/* 顶气泡：小白说 —— 思考时藏掉，让头顶 3 点泡泡当唯一焦点 */}
         {!sending && latestAi && (
           <SpeechBubble who="ai" text={latestAi.content} />
@@ -118,17 +147,6 @@ export default function ChatPage() {
           <StoatHalf view="full" state={stoatState} width={STOAT_WIDTH} />
         </div>
 
-        {/* 空状态（无任何消息时） */}
-        {!latestAi && recentUsers.length === 0 && (
-          <p style={{
-            fontSize: 13, color: 'var(--color-subtle)',
-            position: 'relative', zIndex: 1,
-            marginTop: 16,
-          }}>
-            说点什么，小白会答你
-          </p>
-        )}
-
         {/* 你说：堆叠右对齐贴底，新在底老在顶，opacity 渐弱 */}
         {recentUsers.length > 0 && (
           <div style={{
@@ -137,7 +155,7 @@ export default function ChatPage() {
             display: 'flex', flexDirection: 'column', gap: 6,
             alignItems: 'flex-end',
             zIndex: 2,
-            maxWidth: '70%',
+            maxWidth: '85%',
           }}>
             {recentUsers.map((m, i) => {
               const ageIndex = recentUsers.length - 1 - i   // 0 = 最新
@@ -251,8 +269,8 @@ function HistoryView({ messages, onBack, onNewSession, error }) {
 
 function UserBubble({ text, opacity }) {
   const [expanded, setExpanded] = useState(false)
-  const tooLong = text.length > BUBBLE_MAX_LEN
-  const display = (tooLong && !expanded) ? text.slice(0, BUBBLE_MAX_LEN) + '...' : text
+  const tooLong = text.length > USER_BUBBLE_MAX_LEN
+  const display = (tooLong && !expanded) ? text.slice(0, USER_BUBBLE_MAX_LEN) + '...' : text
 
   return (
     <div
@@ -386,6 +404,82 @@ function ErrorBanner({ children }) {
       fontSize: 13, color: '#933',
       position: 'relative', zIndex: 1,
     }}>{children}</div>
+  )
+}
+
+function ModeToggle({ mode, onChange }) {
+  const isPlan = mode === 'plan'
+  return (
+    <div
+      onClick={() => onChange(isPlan ? 'chat' : 'plan')}
+      title={isPlan ? '任务模式（点击切回闲聊）' : '闲聊模式（点击切到任务）'}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        marginRight: 8,
+        cursor: 'pointer',
+        fontSize: 11,
+        fontFamily: "'Inter', system-ui, sans-serif",
+        userSelect: 'none',
+      }}
+    >
+      <span style={{
+        color: isPlan ? 'var(--color-subtle)' : 'var(--color-primary)',
+        opacity: isPlan ? 0.5 : 1,
+        transition: 'var(--transition) ease-out',
+      }}>
+        闲聊
+      </span>
+      <div
+        style={{
+          width: 34, height: 18,
+          borderRadius: 999,
+          border: `1px solid ${isPlan ? 'var(--color-primary)' : 'var(--color-line)'}`,
+          background: isPlan ? 'var(--color-primary)' : 'var(--color-accent-soft)',
+          position: 'relative',
+          transition: 'background var(--transition) ease-out, border-color var(--transition) ease-out',
+          flexShrink: 0,
+        }}
+      >
+        <span style={{
+          position: 'absolute',
+          top: 1, left: isPlan ? 17 : 1,
+          width: 14, height: 14,
+          borderRadius: '50%',
+          background: '#fff',
+          transition: 'left var(--transition) ease-out',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+        }} />
+      </div>
+      <span style={{
+        color: isPlan ? 'var(--color-primary)' : 'var(--color-subtle)',
+        opacity: isPlan ? 1 : 0.5,
+        transition: 'var(--transition) ease-out',
+      }}>
+        任务
+      </span>
+    </div>
+  )
+}
+
+function ModeHintBanner({ children }) {
+  return (
+    <div style={{
+      position: 'absolute',
+      top: 12, left: '50%',
+      transform: 'translateX(-50%)',
+      padding: '6px 14px',
+      borderRadius: 999,
+      background: 'var(--color-primary)',
+      color: '#fff',
+      fontSize: 12,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+      zIndex: 3,
+      animation: 'modeHintFade 1.8s ease-out',
+    }}>
+      {children}
+    </div>
   )
 }
 

@@ -8,7 +8,7 @@ v2 多用户改造（2026-04-15）：
 
 import logging
 import uuid
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ from db.database import (
     get_companion_name, save_companion_name,
     get_custom_persona, save_custom_persona,
     get_companion_profile as db_get_companion_profile,
+    get_full_profile, get_llm_config, save_llm_config,
     get_daily_routine, save_daily_routine,
     create_project, list_projects, get_project, update_project, delete_project,
     get_tasks_recent, get_tasks_by_project,
@@ -33,7 +34,8 @@ from core.energy import get_current_energy, update_energy, ENERGY_LEVELS
 from core.intent import call_chat
 from core.task_manager import (
     create_task, pause_task, resume_task, complete_task, abandon_task,
-    get_active_task, update_task_minutes, get_today_tasks, delete_task,
+    get_active_task, update_task_minutes, update_task_keyword,
+    get_today_tasks, delete_task,
     create_recurring_task, get_recurring_tasks, delete_recurring_task,
     spawn_daily_tasks, start_task as tm_start_task,
     create_scheduled_task, get_scheduled_tasks, get_due_scheduled_tasks,
@@ -71,6 +73,7 @@ class ChatResponse(BaseModel):
     show_action_buttons: bool = False
     energy_confirm_needed: bool = False
     confirmed: bool = False  # v5 计划模式：DS 是否判定用户已定稿
+    created_tasks: list[dict] = []  # v5 计划模式：本轮 create_tasks 工具写入的任务，前端弹窗用
 
 
 class ProjectCreateRequest(BaseModel):
@@ -159,14 +162,16 @@ def _build_task_board_text(user_id: str) -> str:
 # ---------- 聊天接口 ----------
 
 @app.post("/api/chat", response_model=ChatResponse)
-def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
+def chat(req: ChatRequest, background_tasks: BackgroundTasks,
+         user_id: str = Depends(get_current_user_id)):
     """v5 聊天接口：闲聊 / 计划双模式。
 
     闲聊模式：DS 纯文本输出，无信号块，无推任务。
     计划模式：DS 注册 function calling 工具，可能输出 ---judgment---{"confirmed": true}。
     """
     mode = req.mode if req.mode in ("chat", "plan") else "chat"
-    energy_level = req.energy_level or get_current_energy(user_id)["energy_level"]
+    # v5 精力系统已砍，energy_level 作为 build_chat_message 的占位用，固定 3 够用
+    energy_level = req.energy_level or 3
 
     # 保存用户消息
     save_chat_message(user_id, req.session_id, "user", req.message)
@@ -175,17 +180,30 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
     history = load_session_messages(user_id, req.session_id)
     history = history[:-1]  # 排除刚保存的这条
 
-    # 读取跟宠名字和自定义人格
-    profile = db_get_companion_profile(user_id)
-    companion_name = profile["name"]
-    custom_persona = profile["custom_persona"]
+    # 一次性 SELECT * 读 user_profile 所有字段，分发给各处用——替代原本的 4 次独立查询
+    full_profile = get_full_profile(user_id)
+    companion_name = full_profile.get("companion_name", "小白")
+    custom_persona = full_profile.get("custom_persona", "")
+
+    # BYOK：用户自带 LLM 配置（完整时会走用户自己的，否则回退默认 DeepSeek）
+    user_llm = {
+        "provider": full_profile.get("llm_provider", ""),
+        "base_url": full_profile.get("llm_base_url", ""),
+        "model": full_profile.get("llm_model", ""),
+        "api_key": full_profile.get("llm_api_key", ""),
+    }
 
     # 聊天调用
     try:
-        memo = get_user_memo(user_id)
-        ai_memo_text = get_confirmed_impressions_text(user_id)
-        daily_memo_text = get_filtered_daily_memo(user_id)
-        task_board_text = _build_task_board_text(user_id)
+        memo = full_profile.get("user_memo", "")
+        ai_memo_text = get_confirmed_impressions_text(
+            user_id, ai_memo_raw=full_profile.get("ai_memo", "")
+        )
+        daily_memo_text = get_filtered_daily_memo(
+            user_id, daily_memo_raw=full_profile.get("daily_memo", "{}")
+        )
+        # v5 任务栏不预喂：闲聊模式不聊任务，计划模式 DS 用 query_tasks 按需查（更精准）
+        task_board_text = ""
 
         chat_result = call_chat(
             req.message, energy_level,
@@ -197,6 +215,7 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
             custom_persona=custom_persona,
             mode=mode,
             user_id=user_id,
+            user_llm=user_llm,
         )
     except Exception as e:
         logging.error(f"聊天调用出错: {type(e).__name__}: {e}")
@@ -214,6 +233,17 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
     except Exception as e:
         logging.error(f"记忆关键词匹配失败: {type(e).__name__}: {e}")
 
+    # AI 记忆提取：每 20 轮用户消息异步跑一次（不阻塞响应）
+    # 20 刚好对齐 call_chat 里塞给 DS 的"最近 20 条对话"窗口——
+    # 每滚完一个窗口就让印象系统复盘一次，成本和幻觉都低
+    try:
+        full_history = load_session_messages(user_id, req.session_id)
+        user_count = sum(1 for m in full_history if m.get("role") == "user")
+        if user_count > 0 and user_count % 20 == 0:
+            background_tasks.add_task(update_ai_memory, user_id, full_history)
+    except Exception as e:
+        logging.error(f"记忆更新调度失败: {type(e).__name__}: {e}")
+
     return ChatResponse(
         reply=reply,
         signal={},  # v5 无信号块，保留字段为了前端不破
@@ -221,6 +251,7 @@ def chat(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
         show_action_buttons=False,
         energy_confirm_needed=False,
         confirmed=confirmed,
+        created_tasks=chat_result.get("created_tasks") or [],
     )
 
 
@@ -306,6 +337,23 @@ def abandon(task_id: int, user_id: str = Depends(get_current_user_id)):
 def change_duration(task_id: int, minutes: int, user_id: str = Depends(get_current_user_id)):
     """修改任务时长。"""
     task = update_task_minutes(user_id, task_id, minutes)
+    return {"task": task}
+
+
+class KeywordUpdateRequest(BaseModel):
+    keyword: str
+
+
+@app.post("/api/task/{task_id}/keyword")
+def change_keyword(task_id: int, req: KeywordUpdateRequest,
+                   user_id: str = Depends(get_current_user_id)):
+    """修改任务名。"""
+    keyword = req.keyword.strip()
+    if not keyword:
+        raise HTTPException(400, "任务名不能为空")
+    if len(keyword) > 100:
+        raise HTTPException(400, "任务名不能超过 100 字")
+    task = update_task_keyword(user_id, task_id, keyword)
     return {"task": task}
 
 
@@ -413,15 +461,23 @@ def set_energy(req: EnergyUpdateRequest, user_id: str = Depends(get_current_user
 
 # ---------- 记忆库接口 ----------
 
+USER_MEMO_MAX_LENGTH = 2000
+
+
 @app.get("/api/memo/user")
 def get_memo(user_id: str = Depends(get_current_user_id)):
     """获取用户手记。"""
-    return {"content": get_user_memo(user_id)}
+    return {
+        "content": get_user_memo(user_id),
+        "max_length": USER_MEMO_MAX_LENGTH,
+    }
 
 
 @app.post("/api/memo/user")
 def save_memo(req: MemoRequest, user_id: str = Depends(get_current_user_id)):
     """保存用户手记。"""
+    if len(req.content) > USER_MEMO_MAX_LENGTH:
+        raise HTTPException(400, f"用户手记不能超过 {USER_MEMO_MAX_LENGTH} 字")
     save_user_memo(user_id, req.content)
     return {"message": "已保存"}
 
@@ -536,6 +592,78 @@ def update_daily_routine(req: DailyRoutineRequest,
         raise HTTPException(400, f"日常作息不能超过 {DAILY_ROUTINE_MAX_LENGTH} 字")
     save_daily_routine(user_id, routine)
     return {"routine": routine, "message": "已更新"}
+
+
+# ---------- BYOK：用户自带 LLM API key ----------
+
+class LLMConfigRequest(BaseModel):
+    provider: str = ""
+    base_url: str = ""
+    model: str = ""
+    api_key: str = ""  # 空串 = 不更新 api_key（保留原值）；非空 = 新 key
+
+
+def _mask_api_key(key: str) -> str:
+    """掩码展示 api_key，前端不能拿到明文。"""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "••••••••"
+    return "••••••••" + key[-4:]
+
+
+@app.get("/api/profile/llm")
+def get_llm_config_endpoint(user_id: str = Depends(get_current_user_id)):
+    """返回用户 LLM 配置。api_key 字段只展示掩码（前 • 后 4 位），不回显明文。"""
+    cfg = get_llm_config(user_id)
+    return {
+        "provider": cfg["provider"],
+        "base_url": cfg["base_url"],
+        "model": cfg["model"],
+        "api_key_hint": _mask_api_key(cfg["api_key"]),
+        "has_key": bool(cfg["api_key"]),
+    }
+
+
+@app.put("/api/profile/llm")
+def update_llm_config_endpoint(req: LLMConfigRequest,
+                               user_id: str = Depends(get_current_user_id)):
+    """更新用户 LLM 配置。api_key 空串表示不改（保留原值），非空表示覆盖。"""
+    provider = req.provider.strip()
+    base_url = req.base_url.strip()
+    model = req.model.strip()
+    api_key = req.api_key.strip()
+
+    # 长度校验
+    if len(provider) > 30:
+        raise HTTPException(400, "服务商名字不能超过 30 字")
+    if len(base_url) > 200:
+        raise HTTPException(400, "Base URL 不能超过 200 字")
+    if len(model) > 100:
+        raise HTTPException(400, "Model 不能超过 100 字")
+    if len(api_key) > 200:
+        raise HTTPException(400, "API key 不能超过 200 字")
+
+    save_llm_config(
+        user_id, provider, base_url, model,
+        api_key=api_key if api_key else None,
+    )
+    cfg = get_llm_config(user_id)
+    return {
+        "provider": cfg["provider"],
+        "base_url": cfg["base_url"],
+        "model": cfg["model"],
+        "api_key_hint": _mask_api_key(cfg["api_key"]),
+        "has_key": bool(cfg["api_key"]),
+        "message": "已更新",
+    }
+
+
+@app.delete("/api/profile/llm")
+def clear_llm_config_endpoint(user_id: str = Depends(get_current_user_id)):
+    """清空用户 LLM 配置，回退到默认 DeepSeek。"""
+    save_llm_config(user_id, "", "", "", api_key="")
+    return {"message": "已清空，将使用默认服务"}
 
 
 # ---------- 项目 CRUD（v5） ----------

@@ -40,6 +40,7 @@ export function ChatProvider({ children }) {
   const [error, setError] = useState(null)
   const [mode, setMode] = useState('chat')
   const [planConfirmed, setPlanConfirmed] = useState(false)
+  const [lastCreatedTasks, setLastCreatedTasks] = useState([])   // v5.0 p2: DS 本轮 create_tasks 写入的任务，PlanConfirmModal 事后编辑用
 
   const bootstrapped = useRef(false)
 
@@ -81,7 +82,15 @@ export function ChatProvider({ children }) {
       try {
         const resp = await sendMessage({ message: text, sessionId, mode })
         setMessages(m => [...m, { role: 'assistant', content: resp.reply }])
-        if (resp.confirmed) setPlanConfirmed(true)
+        // 本轮 DS 通过 create_tasks 写入的任务（可能为空）
+        const created = resp.created_tasks || []
+        if (created.length > 0) {
+          setLastCreatedTasks(created)
+        }
+        // confirmed=true 时触发弹窗（但弹窗只有在有 created_tasks 时才有意义）
+        if (resp.confirmed && created.length > 0) {
+          setPlanConfirmed(true)
+        }
       } catch (e) {
         setError(e.message)
       }
@@ -89,9 +98,10 @@ export function ChatProvider({ children }) {
     [sessionId, mode],
   )
 
-  // ── clearPlanConfirmed：confirmed 信号被消费后清掉，防重复触发 extract ──
+  // ── clearPlanConfirmed：confirmed 信号被消费后清掉，防重复触发 ──
   const clearPlanConfirmed = useCallback(() => {
     setPlanConfirmed(false)
+    setLastCreatedTasks([])
   }, [])
 
   // ── resetSession：顶部 ⊕ 新建对话 ──
@@ -115,6 +125,7 @@ export function ChatProvider({ children }) {
     error,
     mode,
     planConfirmed,
+    lastCreatedTasks,
     send,
     setMode,
     clearPlanConfirmed,

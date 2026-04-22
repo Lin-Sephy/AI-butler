@@ -2,7 +2,7 @@
 
 from core.rules_engine import (
     should_trigger_task, validate_reply, check_energy_drift,
-    find_matching_task, should_show_action_buttons,
+    should_show_action_buttons,
 )
 
 
@@ -116,28 +116,6 @@ class TestCheckEnergyDrift:
     def test_invalid_impression_ignored(self):
         _, need = check_energy_drift({"energy_impression": "bad"}, current_energy=4)
         assert need is False
-
-
-# ---- find_matching_task ----
-
-class TestFindMatchingTask:
-    def test_empty_activity_returns_none(self):
-        assert find_matching_task("", [{"keyword": "写论文"}]) is None
-
-    def test_empty_board_returns_none(self):
-        assert find_matching_task("写论文", []) is None
-
-    def test_keyword_contains_activity(self):
-        t = find_matching_task("写论文", [{"keyword": "写论文初稿"}])
-        assert t is not None
-
-    def test_activity_contains_keyword(self):
-        t = find_matching_task("写完论文了", [{"keyword": "论文"}])
-        assert t is not None
-
-    def test_no_overlap_returns_none(self):
-        t = find_matching_task("写论文", [{"keyword": "健身"}])
-        assert t is None
 
 
 # ---- should_show_action_buttons ----

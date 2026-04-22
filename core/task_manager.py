@@ -100,6 +100,15 @@ def update_task_minutes(user_id: str, task_id: int, minutes: int) -> dict:
     return _get_task_by_id(user_id, task_id)
 
 
+def update_task_keyword(user_id: str, task_id: int, keyword: str) -> dict:
+    """修改任务名。"""
+    _patch("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+    }, {"keyword": keyword}, return_row=False)
+    return _get_task_by_id(user_id, task_id)
+
+
 def get_today_tasks(user_id: str) -> list[dict]:
     """获取今天的所有任务（不含已放弃），按创建时间倒序。"""
     today_start = now_cn().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()

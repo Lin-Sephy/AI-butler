@@ -19,6 +19,10 @@ from db.database import (
     get_daily_routine,
     now_cn,
 )
+from core.task_manager import (
+    delete_task as _delete_task_impl,
+    create_task as _create_task_impl,
+)
 
 
 # ════════════════════════════════════════════════════════════
@@ -75,6 +79,88 @@ PLAN_MODE_TOOLS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_tasks",
+            "description": (
+                "批量删除任务栏里的多条任务。一次传一个 task_id 列表，比反复调 delete_task 高效。"
+                "用户表示要取消这些任务时可调用。别主动删用户自建、对话里没讨论过的任务。"
+                "列表里的 task_id 必须从 query_tasks 返回值里取。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "要删除的任务 id 列表（来自 query_tasks 返回的 task_id）",
+                    },
+                },
+                "required": ["task_ids"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_task",
+            "description": (
+                "删除单条任务。多条时优先用 delete_tasks 批量。"
+                "用户表示要取消该任务时可调用。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "integer",
+                        "description": "要删除的任务 id（来自 query_tasks 返回的 task_id）",
+                    },
+                },
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_tasks",
+            "description": (
+                "批量创建任务，一次写入任务栏。用户和你讨论完计划、表示要记下来时调用。"
+                "一次传一个 tasks 数组，包含多条任务；不要一条一条调。"
+                "所有任务会以 idle（待完成）状态写入，不自动开始。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "description": "要创建的任务列表",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "keyword": {
+                                    "type": "string",
+                                    "description": "任务名（用户原话，简短具体）",
+                                },
+                                "minutes": {
+                                    "type": "integer",
+                                    "description": "建议时长（分钟），不确定填 null",
+                                },
+                                "task_type": {
+                                    "type": "string",
+                                    "enum": ["work", "rest"],
+                                    "description": "work=工作/学习，rest=休息/放松",
+                                },
+                            },
+                            "required": ["keyword"],
+                        },
+                    },
+                },
+                "required": ["tasks"],
+            },
+        },
+    },
 ]
 
 
@@ -94,6 +180,7 @@ def _tool_query_tasks(user_id: str, args: dict) -> dict:
     tasks = get_tasks_recent(user_id, days=days)
     records = [
         {
+            "task_id": t.get("id"),
             "keyword": t.get("keyword"),
             "status": t.get("status"),
             "task_type": t.get("task_type"),
@@ -197,19 +284,22 @@ def _tool_query_project(user_id: str, args: dict) -> dict:
 
 
 def _tool_query_schedule(user_id: str, args: dict) -> dict:
-    """今日事件（task_type=event）+ 用户日常作息。"""
+    """今日事件（scheduled_at 在今天的任务）+ 用户日常作息。
+
+    任意 scheduled_at 落在今天的 task 都算"今日事件"——不限 task_type，
+    因为 v5.0 DB 的 task_type 只有 work/rest 没有专门的 event 类型。
+    """
     today = now_cn().strftime("%Y-%m-%d")
 
     tasks = get_tasks_recent(user_id, days=3)
     today_events = []
     for t in tasks:
-        if t.get("task_type") != "event":
-            continue
         scheduled = t.get("scheduled_at") or ""
         if scheduled.startswith(today):
             today_events.append({
                 "time": scheduled,
                 "keyword": t.get("keyword"),
+                "task_type": t.get("task_type"),
             })
 
     routine = get_daily_routine(user_id)
@@ -221,11 +311,122 @@ def _tool_query_schedule(user_id: str, args: dict) -> dict:
     }
 
 
+def _tool_delete_task(user_id: str, args: dict) -> dict:
+    """删除指定任务（限本人）。DS 只有在用户明确要取消时才应调。"""
+    task_id = args.get("task_id")
+    try:
+        task_id = int(task_id)
+    except (TypeError, ValueError):
+        return {"error": "task_id 必须是整数"}
+
+    try:
+        _delete_task_impl(user_id, task_id)
+    except Exception as e:
+        logging.error(f"[PlanTool] delete_task({task_id}) 失败: {type(e).__name__}: {e}")
+        return {"error": f"删除失败: {type(e).__name__}"}
+
+    return {"ok": True, "deleted_task_id": task_id}
+
+
+def _tool_delete_tasks(user_id: str, args: dict) -> dict:
+    """批量删除任务。一次处理多条，省 function calling 轮数。"""
+    raw = args.get("task_ids")
+    if not isinstance(raw, list) or not raw:
+        return {"error": "task_ids 必须是非空整数列表"}
+
+    deleted: list[int] = []
+    failed: list[dict] = []
+    for item in raw:
+        try:
+            tid = int(item)
+        except (TypeError, ValueError):
+            failed.append({"task_id": item, "reason": "不是整数"})
+            continue
+        try:
+            _delete_task_impl(user_id, tid)
+            deleted.append(tid)
+        except Exception as e:
+            logging.error(f"[PlanTool] delete_tasks({tid}) 失败: {type(e).__name__}: {e}")
+            failed.append({"task_id": tid, "reason": type(e).__name__})
+
+    result: dict = {
+        "ok": not failed,
+        "deleted_count": len(deleted),
+        "deleted_task_ids": deleted,
+    }
+    if failed:
+        result["failed"] = failed
+    return result
+
+
+def _tool_create_tasks(user_id: str, args: dict) -> dict:
+    """批量创建任务（一次多条，省轮数）。所有任务 idle 状态，不自动开始。"""
+    raw = args.get("tasks")
+    if not isinstance(raw, list) or not raw:
+        return {"error": "tasks 必须是非空任务列表"}
+
+    # 能量档位读一个占位值（v5.0 不再依赖精力档位）
+    energy_level = 3
+
+    created: list[dict] = []
+    failed: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            failed.append({"task": item, "reason": "不是对象"})
+            continue
+        keyword = (item.get("keyword") or "").strip()
+        if not keyword:
+            failed.append({"task": item, "reason": "缺 keyword"})
+            continue
+
+        task_type = item.get("task_type") or "work"
+        if task_type not in ("work", "rest"):
+            task_type = "work"
+
+        minutes = item.get("minutes")
+        if minutes is not None:
+            try:
+                minutes = max(1, min(480, int(minutes)))
+            except (TypeError, ValueError):
+                minutes = None
+
+        try:
+            row = _create_task_impl(
+                user_id,
+                keyword=keyword, combo="",
+                energy_level=energy_level,
+                suggested_minutes=minutes,
+                task_type=task_type,
+                auto_start=False,
+            )
+            created.append({
+                "task_id": row.get("id"),
+                "keyword": row.get("keyword"),
+                "minutes": row.get("default_minutes"),
+                "task_type": row.get("task_type"),
+            })
+        except Exception as e:
+            logging.error(f"[PlanTool] create_tasks({keyword!r}) 失败: {type(e).__name__}: {e}")
+            failed.append({"keyword": keyword, "reason": type(e).__name__})
+
+    result: dict = {
+        "ok": not failed,
+        "created_count": len(created),
+        "created_tasks": created,
+    }
+    if failed:
+        result["failed"] = failed
+    return result
+
+
 _TOOL_IMPLS = {
     "query_tasks": _tool_query_tasks,
     "query_stats": _tool_query_stats,
     "query_project": _tool_query_project,
     "query_schedule": _tool_query_schedule,
+    "delete_task": _tool_delete_task,
+    "delete_tasks": _tool_delete_tasks,
+    "create_tasks": _tool_create_tasks,
 }
 
 
