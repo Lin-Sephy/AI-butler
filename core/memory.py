@@ -79,19 +79,17 @@ EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印
 # ---- 印象存取 ----
 
 def _get_impressions(user_id: str, ai_memo_raw: str | None = None) -> list[dict]:
-    """从 ai_memo 读取印象列表。兼容旧格式（纯文本直接丢弃）。
+    """从 ai_memo 读取印象列表。
 
     ai_memo_raw：调用方已经有原始字符串时可传入，避免重复查库。
+    _save_impressions 是唯一写入点，总是写合法 JSON。读脏数据/意外格式时返 []，不崩。
     """
     raw = ai_memo_raw if ai_memo_raw is not None else get_ai_memo(user_id)
     if not raw:
         return []
     try:
-        data = json.loads(raw)
-        if isinstance(data, dict) and "impressions" in data:
-            return data["impressions"]
-        return []
-    except json.JSONDecodeError:
+        return json.loads(raw).get("impressions", []) or []
+    except (json.JSONDecodeError, AttributeError):
         return []
 
 

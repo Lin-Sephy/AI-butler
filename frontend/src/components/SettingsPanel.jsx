@@ -98,37 +98,53 @@ export default function SettingsPanel({ onClose }) {
     if (saving) return
     setSaving(true)
     setSaveError(null)
-    try {
-      const o = originalRef.current
-      const tasks = []
 
-      // companion 有 name 和 custom_persona 两字段，一次 PUT 传改动过的
-      const companionPatch = {}
-      if (name !== o.name) companionPatch.name = name
-      if (persona !== o.persona) companionPatch.custom_persona = persona
-      if (Object.keys(companionPatch).length > 0) {
-        tasks.push(apiFetch('/api/profile/companion', { method: 'PUT', body: companionPatch }))
-      }
+    const o = originalRef.current
+    const jobs = []  // { label, promise, apply }
 
-      if (routine !== o.routine) {
-        tasks.push(apiFetch('/api/profile/daily_routine', { method: 'PUT', body: { routine } }))
-      }
+    // companion 有 name 和 custom_persona 两字段，一次 PUT 传改动过的
+    const companionPatch = {}
+    if (name !== o.name) companionPatch.name = name
+    if (persona !== o.persona) companionPatch.custom_persona = persona
+    if (Object.keys(companionPatch).length > 0) {
+      jobs.push({
+        label: '名字/性格',
+        promise: apiFetch('/api/profile/companion', { method: 'PUT', body: companionPatch }),
+        apply: snap => { snap.name = name; snap.persona = persona },
+      })
+    }
+    if (routine !== o.routine) {
+      jobs.push({
+        label: '日常作息',
+        promise: apiFetch('/api/profile/daily_routine', { method: 'PUT', body: { routine } }),
+        apply: snap => { snap.routine = routine },
+      })
+    }
+    if (userMemo !== o.userMemo) {
+      jobs.push({
+        label: '手记',
+        promise: apiFetch('/api/memo/user', { method: 'POST', body: { content: userMemo } }),
+        apply: snap => { snap.userMemo = userMemo },
+      })
+    }
 
-      if (userMemo !== o.userMemo) {
-        tasks.push(apiFetch('/api/memo/user', { method: 'POST', body: { content: userMemo } }))
-      }
+    // allSettled：部分字段失败不影响其他字段入库；快照只更新成功的，让失败字段继续显示"待保存"
+    const results = await Promise.allSettled(jobs.map(j => j.promise))
+    const nextSnap = { ...o }
+    const failed = []
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') jobs[i].apply(nextSnap)
+      else failed.push({ label: jobs[i].label, reason: r.reason?.message })
+    })
+    originalRef.current = nextSnap
 
-      await Promise.all(tasks)
-
-      // 更新快照
-      originalRef.current = { name, persona, routine, userMemo }
+    if (failed.length === 0) {
       setSavedHint(true)
       setTimeout(() => setSavedHint(false), 1500)
-    } catch (e) {
-      setSaveError(e.message)
-    } finally {
-      setSaving(false)
+    } else {
+      setSaveError(`部分没存上：${failed.map(f => `${f.label}（${f.reason || '未知错误'}）`).join('，')}`)
     }
+    setSaving(false)
   }
 
   // ─── 清空 AI 记忆 ───

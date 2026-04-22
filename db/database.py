@@ -350,18 +350,15 @@ def get_avg_energy_7d(user_id: str) -> float | None:
 # ---- action_log CRUD ----
 
 def save_action_log(user_id: str, recommendation: str, user_action: str,
-                    energy: int | None = None,
-                    intent: str = "", strategy: str = "") -> None:
+                    energy: int | None = None) -> None:
     """记录用户对推荐的反馈。
 
-    energy 为 None 表示"此刻精力未知"（写 NULL 到 DB），
-    intent / strategy 是 MVP 遗产字段，默认空串。
+    energy 为 None 表示"此刻精力未知"（写 NULL 到 DB）。
+    DB 里还留着 intent / strategy 两个 v4 遗留 nullable 列，等 migrate 统一删（死代码清单 #3）。
     """
     _post("action_log", {
         "user_id": user_id,
         "energy_at_action": energy,
-        "intent": intent,
-        "strategy": strategy,
         "recommendation": recommendation,
         "user_action": user_action,
         "timestamp": now_cn().isoformat(),

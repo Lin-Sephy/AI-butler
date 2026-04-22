@@ -32,21 +32,20 @@ export async function loadHistory(sessionId) {
  *   - mode='plan'：计划模式，DS 注册 function calling 工具按需查数据；
  *                  DS 判定用户定稿时返回 confirmed=true；本轮 DS 写入的任务在 created_tasks 里
  *
- * @param {{message: string, sessionId: string, mode?: 'chat'|'plan', energyLevel?: number|null}} opts
+ * @param {{message: string, sessionId: string, mode?: 'chat'|'plan'}} opts
  * @returns {Promise<{
  *   reply: string,
  *   confirmed: boolean,         // 计划模式下 DS 是否判定用户定稿
  *   created_tasks: Array<{task_id, keyword, minutes, task_type}>,  // 本轮 DS 写入的任务
  * }>}
  */
-export async function sendMessage({ message, sessionId, mode = 'chat', energyLevel = null }) {
+export async function sendMessage({ message, sessionId, mode = 'chat' }) {
   return apiFetch('/api/chat', {
     method: 'POST',
     body: {
       message,
       session_id: sessionId,
       mode,
-      energy_level: energyLevel,
     },
   })
 }

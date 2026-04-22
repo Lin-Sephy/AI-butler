@@ -72,7 +72,11 @@ export default function ChatPage() {
 
   // 小白：最新一条（保留泡尾居中）；你：最近 4 条堆叠右对齐淡化
   const latestAi   = [...messages].reverse().find(m => m.role === 'assistant')
-  const recentUsers = messages.filter(m => m.role === 'user').slice(-4)
+  // 保留每条用户消息在 messages 里的绝对索引做 key（避免消息变动时 React remount 动画）
+  const userMsgs = messages
+    .map((m, absIdx) => ({ ...m, absIdx }))
+    .filter(m => m.role === 'user')
+  const recentUsers = userMsgs.slice(-4)
   const USER_OPACITY = [0.15, 0.35, 0.65, 1]   // 最老 → 最新
 
   // 白鼬状态：sending 时 thinking；用户在输入框打字时 listening；否则 idle
@@ -161,7 +165,7 @@ export default function ChatPage() {
               const ageIndex = recentUsers.length - 1 - i   // 0 = 最新
               const opacity = USER_OPACITY[USER_OPACITY.length - 1 - ageIndex] ?? 0.1
               return (
-                <UserBubble key={`u-${messages.length - recentUsers.length + i}`} text={m.content} opacity={opacity} />
+                <UserBubble key={`u-${m.absIdx}`} text={m.content} opacity={opacity} />
               )
             })}
           </div>

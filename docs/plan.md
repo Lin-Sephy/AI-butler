@@ -330,6 +330,46 @@
 
 ---
 
+## 上线前必做清单（2026-04-22 整理）
+
+代码侧 v5 清理 + 修复已在 commit `0be2f29`→`1d0b702` 五连推完成，剩下**运维侧的人类动作**：
+
+### 1. BYOK 落地（最关键·另一个小克推进中）
+- 后端：`user_profile.deepseek_api_key` 字段已建，`core/intent.py:call_chat` 已支持 `user_llm` 参数按需替换 DS 调用
+- 前端：`LlmConfig.jsx` 组件已建，`SettingsPanel` 接上
+- **未完成：** 强制 BYOK 检查——目前无 key 回退共享 key，任何人拿 URL 注册就烧我们的账单。BYOK 就位前**只能给内测熟人用**，不广发
+- 完成后：Render 环境变量可以考虑删 `DEEPSEEK_API_KEY`，强制 BYOK
+
+### 2. Render 环境变量加 `ALLOWED_ORIGINS`
+- 前端部署到 Vercel 拿到域名后（比如 `https://ai-butler-xxx.vercel.app`），在 Render Dashboard → Settings → Environment 加：
+  ```
+  ALLOWED_ORIGINS=https://ai-butler-xxx.vercel.app
+  ```
+- 多个前端域名用逗号分隔（自己的测试域名也加进去）
+- 不加的话后端退回 `*` 放行，能跑但不安全
+
+### 3. 前端部署到 Vercel
+- `frontend/.env.local` 本地填：
+  - `VITE_SUPABASE_URL=https://ieakiihfsaqqyyjdyjtt.supabase.co`
+  - `VITE_SUPABASE_ANON_KEY=<anon key>`
+  - `VITE_API_BASE_URL=https://ai-butler-1sp8.onrender.com`
+- Vercel 项目 Settings → Environment Variables 同步这三条（Production + Preview 都配）
+- 部署后把 Vercel 给的域名填回 Render 的 `ALLOWED_ORIGINS`（见 #2）
+
+### 4. 跑一次 L2 smoke 验证
+- Render auto-deploy 完 + 前端部署完 + 环境变量配好后，本地跑：
+  ```
+  python scripts/smoke.py
+  ```
+- 10 步闭环：匿名登录 → 任务面板 → 聊天 → 手建任务 → 完成 → 计划模式触发 DS create_tasks → 清理
+- Step 8-10（plan mode）DS 不一定每次都调 create_tasks——看 log 判断 function calling 链路是否通
+
+### 5. 观察事项（非阻塞，上线后盯一阵）
+- **MODE_SWITCH_HINT prompt 是否起作用**：闲聊模式下提到排计划时，DS 是否会顺口提"要不要切计划模式"。漏了或过度触发 → 调整 prompt
+- **MAX_TOOL_ROUNDS = 15 是否够**：极端情况 DS 陷循环调同一工具会烧 15 次 API。看日志里有没有 `function calling 超过 15 轮未收敛` warning
+
+---
+
 ## v5.0 前端对接（后端由小克做，前端待做）
 
 背景：2026-04-20 prompt + 产品架构重构，详见 `docs/ds多版本prompt对比/2026-04-20_v5.0_开工文档.md`。以下是前端需要配合的改动：

@@ -71,7 +71,6 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str
     mode: str = "chat"  # "chat" | "plan"
-    energy_level: int | None = None  # None 时自动获取当前精力
 
 
 class ChatResponse(BaseModel):
@@ -170,8 +169,6 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     计划模式：DS 注册 function calling 工具，可能输出 ---judgment---{"confirmed": true}。
     """
     mode = req.mode if req.mode in ("chat", "plan") else "chat"
-    # v5 精力系统已砍，energy_level 作为 build_chat_message 的占位用，固定 3 够用
-    energy_level = req.energy_level or 3
 
     # 保存用户消息
     save_chat_message(user_id, req.session_id, "user", req.message)
@@ -206,7 +203,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
         task_board_text = ""
 
         chat_result = call_chat(
-            req.message, energy_level,
+            req.message,
             chat_history=history,
             user_memo=memo, ai_memo=ai_memo_text,
             daily_memo=daily_memo_text,

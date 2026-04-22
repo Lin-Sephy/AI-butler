@@ -131,7 +131,7 @@ def get_chat_prompt(companion_name: str = "小白",
     return "\n".join(parts)
 
 
-def build_chat_message(user_input: str, energy_level: int,
+def build_chat_message(user_input: str,
                        user_memo: str = "",
                        ai_memo: str = "",
                        daily_memo: str = "",

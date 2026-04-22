@@ -23,7 +23,12 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch(path, opts = {}) {
+// 自动重试配置：只对 GET 做（幂等），其他方法失败就失败
+const _GET_MAX_RETRIES = 3   // 首次 + 2 次重试
+const _GET_RETRY_DELAY = 500 // ms
+
+
+async function _doFetch(path, opts = {}) {
   const { method = 'GET', body, headers = {} } = opts
 
   // 取当前 session 的 access_token
@@ -59,4 +64,39 @@ export async function apiFetch(path, opts = {}) {
   }
 
   return data
+}
+
+
+/**
+ * apiFetch：带 JWT 的后端调用。
+ *
+ * 自动重试策略：
+ *   - 只对 GET 请求重试（幂等，安全）
+ *   - POST/PUT/PATCH/DELETE 失败一次就抛，避免重复创建/重复扣除等副作用
+ *   - 重试条件：TypeError（浏览器 fetch 层失败，如 Failed to fetch）或 5xx 响应
+ *   - 不重试：4xx 业务错、401 未授权
+ */
+export async function apiFetch(path, opts = {}) {
+  const method = (opts.method || 'GET').toUpperCase()
+  const retryable = method === 'GET'
+  const maxAttempts = retryable ? _GET_MAX_RETRIES : 1
+
+  let lastErr = null
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await _doFetch(path, opts)
+    } catch (e) {
+      lastErr = e
+      // 判断是否值得重试：网络层抛 TypeError；业务层抛 ApiError 只在 5xx 时重试
+      const isNetworkError = e instanceof TypeError
+      const is5xx = e instanceof ApiError && e.status >= 500 && e.status < 600
+      const shouldRetry = retryable && (isNetworkError || is5xx)
+
+      if (!shouldRetry || attempt === maxAttempts - 1) throw e
+
+      console.warn(`[apiFetch] GET ${path} 第 ${attempt + 1} 次失败（${e.message}），${_GET_RETRY_DELAY}ms 后重试`)
+      await new Promise(r => setTimeout(r, _GET_RETRY_DELAY))
+    }
+  }
+  throw lastErr
 }

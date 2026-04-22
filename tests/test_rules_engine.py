@@ -18,45 +18,45 @@ def _sig(**kw):
 class TestShouldTriggerTask:
     def test_no_activity_mentioned_no_trigger(self):
         assert should_trigger_task(
-            _sig(activity_category="work", user_attitude="wants_help"), 4, []
+            _sig(activity_category="work", user_attitude="wants_help")
         ) is False
 
     def test_life_category_never_triggers(self):
         assert should_trigger_task(
             _sig(mentioned_activity="吃饭", activity_category="life",
-                 user_attitude="wants_help"), 4, []
+                 user_attitude="wants_help")
         ) is False
 
     def test_work_wants_help_triggers(self):
         assert should_trigger_task(
             _sig(mentioned_activity="写论文", activity_category="work",
-                 user_attitude="wants_help"), 4, []
+                 user_attitude="wants_help")
         ) is True
 
     def test_work_wants_to_start_triggers(self):
         assert should_trigger_task(
             _sig(mentioned_activity="开始写报告", activity_category="work",
-                 user_attitude="wants_to_start"), 4, []
+                 user_attitude="wants_to_start")
         ) is True
 
     def test_work_frustrated_no_trigger(self):
         """frustrated 状态先接住情绪，不急着推任务。"""
         assert should_trigger_task(
             _sig(mentioned_activity="写论文", activity_category="work",
-                 user_attitude="frustrated"), 4, []
+                 user_attitude="frustrated")
         ) is False
 
     def test_rest_wants_help_no_trigger(self):
         """v4.1 改动：rest 类不触发推任务。"""
         assert should_trigger_task(
             _sig(mentioned_activity="休息", activity_category="rest",
-                 user_attitude="wants_help"), 4, []
+                 user_attitude="wants_help")
         ) is False
 
     def test_just_sharing_no_trigger(self):
         assert should_trigger_task(
             _sig(mentioned_activity="写论文", activity_category="work",
-                 user_attitude="just_sharing"), 4, []
+                 user_attitude="just_sharing")
         ) is False
 
 

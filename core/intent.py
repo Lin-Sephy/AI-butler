@@ -29,14 +29,8 @@ API_CONFIG = {
 MAX_TOOL_ROUNDS = 15
 
 # ---- 兜底 ----
-FALLBACK_TEMPLATES = {
-    5: "你现在状态不错！想做点什么吗？",
-    4: "状态还行，想做什么跟我说～",
-    3: "今天精力一般，要不先做件简单的事热热身？",
-    2: "现在精力比较低，建议先休息一下或者做个最简单的小任务。",
-    1: "你现在最需要的是休息。先睡一觉或者出去走走，其他的等恢复了再说。",
-}
-
+# v5 不再按精力档位分兜底文案——精力系统已砍
+FRESH_FALLBACK = "你好呀～今天过得怎么样？"
 MID_CHAT_FALLBACK = "网络开小差了，你刚才说的我没接住——能再说一次吗？"
 
 
@@ -64,14 +58,18 @@ def _get_client(user_llm: dict | None = None) -> tuple[OpenAI, str]:
     ), API_CONFIG["model"]
 
 
-def _parse_chat_reply(raw: str) -> tuple[str, bool]:
+def _parse_chat_reply(raw: str, mode: str = "chat") -> tuple[str, bool]:
     """从 DS 回复中分离正文和 ---judgment--- 信号块。
 
     返回 (reply_text, confirmed)。
-    闲聊模式 DS 不应该输出 judgment 块，但如果有，忽略即可。
-    计划模式仅当 judgment 里 confirmed=true 时 confirmed 返回 True。
+    闲聊模式 DS 不应输出 judgment 块；如果 DS 违规输出，整体当正文保留、confirmed=False
+    （不承认 v4-like 的隐式触发）。计划模式按正常解析。
     """
     if "---judgment---" not in raw:
+        return raw.strip(), False
+
+    if mode != "plan":
+        # 闲聊模式不承认 judgment 块，整体当文本——保留完整输出避免截断
         return raw.strip(), False
 
     reply_part, _, signal_part = raw.partition("---judgment---")
@@ -94,7 +92,7 @@ def _parse_chat_reply(raw: str) -> tuple[str, bool]:
     return reply, confirmed
 
 
-def call_chat(user_input: str, energy_level: int,
+def call_chat(user_input: str,
               chat_history: list | None = None,
               user_memo: str = "",
               ai_memo: str = "",
@@ -108,17 +106,15 @@ def call_chat(user_input: str, energy_level: int,
     """聊天调用。
 
     mode="chat"：闲聊模式，不注册工具，纯文本输出
-    mode="plan"：计划模式，注册 4 个查询工具（function calling），
-                 DS 可按需调用；输出末尾可能带 judgment 信号块
+    mode="plan"：计划模式，注册 function calling 工具（查询 + 写入），
+                 DS 可按需调用；输出末尾可能带 judgment 信号块（confirmed）
 
     plan 模式必须传 user_id（工具执行要用）。
 
     user_llm：BYOK 用户配置（provider/base_url/model/api_key）。
               完整时走用户的，否则回退默认 DeepSeek。
 
-    返回 {"reply": str, "signal": {}, "confirmed": bool}
-    （signal 始终空 dict，保留字段名是为了 api.py 老代码不崩；
-     confirmed 仅 plan 模式有意义）
+    返回 {"reply": str, "confirmed": bool, "created_tasks": list}
     """
     has_history = bool(chat_history)
 
@@ -128,7 +124,7 @@ def call_chat(user_input: str, energy_level: int,
     # 有用户自带 key 就绕过默认 key 的判断
     has_user_key = bool(user_llm and user_llm.get("api_key") and user_llm.get("base_url") and user_llm.get("model"))
     if not has_user_key and not config.DEEPSEEK_API_KEY:
-        fallback = MID_CHAT_FALLBACK if has_history else FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
+        fallback = MID_CHAT_FALLBACK if has_history else FRESH_FALLBACK
         return {"reply": fallback, "confirmed": False}
 
     try:
@@ -139,7 +135,7 @@ def call_chat(user_input: str, energy_level: int,
             mode=mode,
         )
         user_message = build_chat_message(
-            user_input, energy_level,
+            user_input,
             user_memo=user_memo, ai_memo=ai_memo,
             daily_memo=daily_memo, task_board=task_board,
         )
@@ -201,9 +197,9 @@ def call_chat(user_input: str, energy_level: int,
             logging.warning(f"[Chat] function calling 超过 {MAX_TOOL_ROUNDS} 轮未收敛")
 
         logging.warning(f"[Chat raw] {raw_final[:300]}")
-        reply, confirmed = _parse_chat_reply(raw_final)
+        reply, confirmed = _parse_chat_reply(raw_final, mode=mode)
         if not reply:
-            reply = FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
+            reply = FRESH_FALLBACK
 
         return {
             "reply": reply,
@@ -213,7 +209,7 @@ def call_chat(user_input: str, energy_level: int,
 
     except Exception as e:
         logging.error(f"[Chat] API 调用失败: {type(e).__name__}: {e}")
-        fallback = MID_CHAT_FALLBACK if has_history else FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
+        fallback = MID_CHAT_FALLBACK if has_history else FRESH_FALLBACK
         return {
             "reply": fallback,
             "confirmed": False,

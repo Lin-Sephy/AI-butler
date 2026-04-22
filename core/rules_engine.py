@@ -7,8 +7,8 @@ v5 架构变了：聊天 / 计划双模式走 function calling，不再用 v4 �
 
 # ---- 任务触发判断 ----
 
-def should_trigger_task(signal: dict, energy_level: int, task_board: list[dict]) -> bool:
-    """根据 DS 聊天信号 + 精力 + 任务栏，判断是否需要触发第二次调用（推任务）。
+def should_trigger_task(signal: dict) -> bool:
+    """根据 DS 聊天信号判断是否需要触发推任务（v4 遗留，v5 未调用，保留供未来规则引擎参考）。
 
     保守策略：不确定时不触发。
 
