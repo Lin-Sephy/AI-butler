@@ -1,9 +1,8 @@
-"""规则引擎 v4：Python 主导任务触发判断 + 守门校验。
+"""规则引擎（v4 遗留的纯逻辑工具）。
 
-核心变化：
-- 新增 should_trigger_task()：根据 DS 信号 + 精力 + 任务栏决定是否触发推任务
-- 守门校验保留，只在 call_task 结果上做
-- check_energy_drift 改用信号里的 energy_impression
+v5 架构变了：聊天 / 计划双模式走 function calling，不再用 v4 的"call_chat 出信号 →
+规则引擎判断 → call_task 推任务"三段式。本文件里的函数在 v5 里**都不被生产路径调用**，
+纯作为 L1 单测保护的逻辑残留。彻底砍看死代码清单 #5 / #8 / #11。
 """
 
 # ---- 任务触发判断 ----
@@ -81,7 +80,7 @@ def build_fallback(energy_level: int) -> str:
 def validate_reply(task_response: dict, energy_level: int) -> tuple[bool, str]:
     """检查任务推荐是否违反精力规则。返回 (is_valid, final_reply)。
 
-    仅在 call_task 的结果上调用。
+    v4 遗留：v5 不再调用，保留纯函数供未来参考。
     """
     reply = task_response.get("reply", "")
     task_kw = task_response.get("task_keyword", "") or ""

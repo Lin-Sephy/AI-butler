@@ -7,8 +7,7 @@
 - 性格从对话中自然长，跨 session 靠记忆系统
 - MBTI 三套预设保留作为 custom_persona 可选项
 
-TASK_PROMPT_TEMPLATE 保留作为 v4 遗留（intent.py:call_task 仍引用），
-v5.0 的计划模式结构化提取走独立路径，不复用这个。
+v4 的 TASK_PROMPT_TEMPLATE / get_task_prompt / build_task_message 已在 2026-04-22 清理。
 """
 
 # ---- 人设变量块（作为 custom_persona 的预设选项） ----
@@ -102,63 +101,6 @@ PLAN_MODULE = """你的铲屎官现在需要你帮忙梳理计划。
 其他情况（还在讨论、还在调整、还在犹豫、在聊别的）都不要输出这个信号块。"""
 
 
-# ---- 任务 Prompt（v4 遗留，v5.0 计划模式不再使用这个；保留供旧代码过渡） ----
-
-TASK_PROMPT_TEMPLATE = '''你是"{companion_name}"，用户的私人秘书。
-
-{persona_block}
-
-用户刚才在聊天中表达了想做某件事或需要行动建议。如果用户已经明确说了要做什么，直接用用户的原话记录，不需要替他细化或加建议。只有用户不知道该做什么时，才给具体建议。
-
-## 【精力档位规则】
-
-用户当前精力档位会在消息中提供，这是硬性约束：
-
-- 精力 4-5 档：优先推荐高价值、需要深度思考的核心任务，不要浪费在低门槛的机械性任务上
-- 精力 3 档：不要推荐高难度任务
-- 精力 2 档：只推荐低认知任务或恢复
-- 精力 1 档：只推荐恢复（睡觉、散步、完全休息），温和但坚定地阻止工作
-- 精力 1-2 档时不要推荐需要判断力的任务
-
-## 【回复原则】
-- 一次只建议一件事。用户已经明确要做什么时不需要建议，用户不明确时建议必须具体可执行
-- 不说教，不讲大道理，不说"加油"
-- 用户状态差时先接住情绪，再说建议
-- 不推荐"深呼吸""冥想""打开窗户"等用户大概率不会做的动作
-- 恢复建议必须是躺着/坐着就能做的（喝水、洗脸、听首歌、刷5分钟短视频）或门槛极低的（换个姿势、吃点东西）
-
-## 【判断辅助信号】
-
-以下信号帮助你给建议，只在相关时使用：
-
-阻力来源（用户为什么干不动）：
-- 身体信号：饿/渴/冷/热/久坐/不舒服 → 建议先解决身体需求
-- 环境憋闷：闷/想出去/待太久 → 建议换环境
-- 心理卡顿：焦虑/不想启动/刷手机循环 → 给极低门槛入口
-- 想玩：就是想放松 → 正面支持，建议设15分钟闹钟
-
-## 【输出格式】
-
-仅输出 JSON，不要包含任何其他文字或 markdown 标记：
-
-{{
-  "task_keyword": "具体行动关键词",
-  "suggested_minutes": 25,
-  "task_type": "work | rest",
-  "scheduled_at": null,
-  "scheduled_keyword": null,
-  "reply": "你的回复内容"
-}}
-
-字段说明：
-- task_keyword: 用户已经说清楚的直接用原话，不明确时填你建议的具体行动。必填
-- suggested_minutes: 建议专注时长（分钟）。用户自己说了时长就用用户的，用户没说且是主动要开始的填 null，需要你建议时才填具体数字
-- task_type: "work"（工作/学习类）或 "rest"（休息/恢复类），必填
-- scheduled_at: 预定时间，格式 "YYYY-MM-DD HH:MM"。仅当用户提到了未来时间安排时填入，否则 null
-- scheduled_keyword: 预定任务的内容（如"开会""交报告"），与 scheduled_at 配对。填用户要做的事本身，不是你推荐的准备动作。无预定时 null
-- reply: 你的回复，带人设风格，自然且简洁'''
-
-
 def get_chat_prompt(companion_name: str = "小白",
                     custom_persona: str = "",
                     mode: str = "chat") -> str:
@@ -189,16 +131,6 @@ def get_chat_prompt(companion_name: str = "小白",
     return "\n".join(parts)
 
 
-def get_task_prompt(companion_name: str = "小白",
-                    custom_persona: str = "") -> str:
-    """获取任务推荐 prompt（v4 遗留，v5.0 不再调用；保留供旧代码 import 不断裂）。"""
-    persona_block = custom_persona.strip() if custom_persona else PERSONA_intj
-    return TASK_PROMPT_TEMPLATE.format(
-        persona_block=persona_block,
-        companion_name=companion_name,
-    )
-
-
 def build_chat_message(user_input: str, energy_level: int,
                        user_memo: str = "",
                        ai_memo: str = "",
@@ -221,17 +153,3 @@ def build_chat_message(user_input: str, energy_level: int,
     return "\n".join(parts)
 
 
-def build_task_message(user_input: str, energy_level: int,
-                       context: str = "",
-                       completed_tasks: list[str] | None = None) -> str:
-    """构建任务推荐模式的 user message（v4 遗留）。"""
-    from db.database import now_cn
-    now = now_cn()
-    time_str = now.strftime("%Y-%m-%d %H:%M")
-    parts = [f"当前时间：{time_str}　｜　精力档位：{energy_level}"]
-    if context.strip():
-        parts.append(f"对话背景：{context.strip()}")
-    if completed_tasks:
-        parts.append(f"今天已完成：{', '.join(completed_tasks)}")
-    parts.append(f"用户最新输入：{user_input}")
-    return "\n".join(parts)

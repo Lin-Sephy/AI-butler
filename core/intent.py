@@ -3,8 +3,8 @@
 v5.0 重构（2026-04-20，见开工文档）：
 - call_chat(mode="chat"/"plan")：闲聊纯文本，计划模式注册 function calling 工具
 - 闲聊模式无信号块，DS 输出纯文本
-- 计划模式 DS 可调 4 个查询工具，输出末尾可能带 ---judgment---{"confirmed": true}
-- call_task 保留作为 v4 遗留（api.py 当前还在引用，v5.0 完整切换后才砍）
+- 计划模式 DS 可调查询/写入工具，输出末尾可能带 ---judgment---{"confirmed": true}
+- v4 的 call_task / EMPTY_SIGNAL / TASK prompt 全套已在 v5 迁移完成后清理（2026-04-22）
 """
 
 import json
@@ -12,10 +12,7 @@ import logging
 import httpx
 from openai import OpenAI
 import config
-from prompts.system_prompt import (
-    get_chat_prompt, get_task_prompt,
-    build_chat_message, build_task_message,
-)
+from prompts.system_prompt import get_chat_prompt, build_chat_message
 from core.plan_tools import PLAN_MODE_TOOLS, execute_tool
 
 # ---- API 调用参数 ----
@@ -41,10 +38,6 @@ FALLBACK_TEMPLATES = {
 }
 
 MID_CHAT_FALLBACK = "网络开小差了，你刚才说的我没接住——能再说一次吗？"
-
-# v4 遗留：部分上层代码仍期望 result 里有 signal 字段。v5 里始终为空 dict，
-# 让 should_trigger_task 等老函数拿到 {} 就自然 no-op。
-EMPTY_SIGNAL: dict = {}
 
 
 def _get_client(user_llm: dict | None = None) -> tuple[OpenAI, str]:
@@ -136,7 +129,7 @@ def call_chat(user_input: str, energy_level: int,
     has_user_key = bool(user_llm and user_llm.get("api_key") and user_llm.get("base_url") and user_llm.get("model"))
     if not has_user_key and not config.DEEPSEEK_API_KEY:
         fallback = MID_CHAT_FALLBACK if has_history else FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
-        return {"reply": fallback, "signal": dict(EMPTY_SIGNAL), "confirmed": False}
+        return {"reply": fallback, "confirmed": False}
 
     try:
         client, model_name = _get_client(user_llm)
@@ -214,7 +207,6 @@ def call_chat(user_input: str, energy_level: int,
 
         return {
             "reply": reply,
-            "signal": dict(EMPTY_SIGNAL),
             "confirmed": confirmed,
             "created_tasks": created_tasks,
         }
@@ -224,142 +216,6 @@ def call_chat(user_input: str, energy_level: int,
         fallback = MID_CHAT_FALLBACK if has_history else FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
         return {
             "reply": fallback,
-            "signal": dict(EMPTY_SIGNAL),
             "confirmed": False,
             "created_tasks": [],
-        }
-
-
-# ════════════════════════════════════════════════════════════
-# call_task：v4 遗留，v5.0 切换完成后和 app.py 一起清理
-# ════════════════════════════════════════════════════════════
-
-
-def _parse_task_response(raw: str) -> dict | None:
-    """解析任务推荐的 JSON 响应。"""
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-    cleaned = cleaned.strip()
-
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        return None
-
-
-def _validate_task_fields(data: dict) -> dict:
-    """校验任务 JSON 字段。"""
-    if not isinstance(data.get("task_keyword"), str) or not data["task_keyword"].strip():
-        data["task_keyword"] = None
-
-    if data.get("task_type") not in ("work", "rest"):
-        data["task_type"] = "work"
-
-    if data.get("suggested_minutes") is not None:
-        try:
-            val = int(data["suggested_minutes"])
-            data["suggested_minutes"] = max(5, min(120, val))
-        except (TypeError, ValueError):
-            data["suggested_minutes"] = 25
-
-    if data.get("scheduled_at") is not None:
-        try:
-            from datetime import datetime
-            datetime.strptime(data["scheduled_at"], "%Y-%m-%d %H:%M")
-        except (TypeError, ValueError):
-            data["scheduled_at"] = None
-
-    if data.get("scheduled_at") is None:
-        data["scheduled_keyword"] = None
-    elif not isinstance(data.get("scheduled_keyword"), str) or not data.get("scheduled_keyword", "").strip():
-        data["scheduled_keyword"] = None
-        data["scheduled_at"] = None
-
-    if not isinstance(data.get("reply"), str) or not data["reply"].strip():
-        data["reply"] = None
-
-    return data
-
-
-def call_task(user_input: str, energy_level: int,
-              chat_history: list | None = None,
-              completed_tasks: list[str] | None = None,
-              context: str = "",
-              companion_name: str = "小白",
-              custom_persona: str = "") -> dict:
-    """任务推荐调用：给出具体任务建议（v4 遗留）。
-
-    v5.0 的计划模式不走这条路径——结构化提取走独立流程。
-    保留此函数是因为 api.py 的 /api/chat 仍在 if trigger 分支里引用。
-    随着 api.py 在 Step 3 改造完成，此函数可删。
-    """
-    if not config.DEEPSEEK_API_KEY:
-        return {
-            "task_keyword": None,
-            "suggested_minutes": None,
-            "task_type": None,
-            "scheduled_at": None,
-            "scheduled_keyword": None,
-            "reply": FALLBACK_TEMPLATES.get(energy_level, "你好呀～"),
-        }
-
-    try:
-        client, _ = _get_client()
-        system_prompt = get_task_prompt(companion_name=companion_name, custom_persona=custom_persona)
-        user_message = build_task_message(
-            user_input, energy_level,
-            context=context,
-            completed_tasks=completed_tasks,
-        )
-
-        messages = [{"role": "system", "content": system_prompt}]
-        if chat_history:
-            recent = chat_history[-10:]
-            for msg in recent:
-                messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": user_message})
-
-        resp = client.chat.completions.create(
-            model=API_CONFIG["model"],
-            temperature=API_CONFIG["temperature"],
-            max_tokens=API_CONFIG["max_tokens"],
-            top_p=API_CONFIG["top_p"],
-            messages=messages,
-        )
-
-        raw = resp.choices[0].message.content
-        logging.warning(f"[Task raw] {raw[:300]}")
-
-        parsed = _parse_task_response(raw)
-        if parsed is None:
-            logging.warning("[Task] JSON 解析失败，使用兜底")
-            return {
-                "task_keyword": None,
-                "reply": raw.strip() or FALLBACK_TEMPLATES.get(energy_level, "你好呀～"),
-            }
-
-        parsed = _validate_task_fields(parsed)
-
-        if parsed["reply"] is None:
-            parsed["reply"] = FALLBACK_TEMPLATES.get(energy_level, "你好呀～")
-
-        return parsed
-
-    except Exception as e:
-        logging.error(f"[Task] API 调用失败: {type(e).__name__}: {e}")
-        return {
-            "task_keyword": None,
-            "suggested_minutes": None,
-            "task_type": None,
-            "scheduled_at": None,
-            "scheduled_keyword": None,
-            "reply": MID_CHAT_FALLBACK,
         }

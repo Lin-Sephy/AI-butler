@@ -116,26 +116,19 @@ ai-butler/
     └── test_memory.py            # _maybe_promote / _apply_decay / _extract_keywords
 ```
 
-## 核心架构：聊天归 AI，推任务归 Python（v4）
+## 核心架构：v5 双模式聊天 + function calling（2026-04-22 现状）
 
 ```
-用户输入 → call_chat（DS 自然聊天 + 输出观察信号）
-         → Python 解析信号（energy_impression / emotion / mentioned_activity / activity_category / user_attitude）
-         → Python 判断是否触发推任务（should_trigger_task）：
-           → 不触发 → 只展示聊天回复，无按钮
-           → 触发   → call_task（DS 给出具体任务建议 JSON）→ 守门校验 → 展示回复 + 按钮
+用户输入 + mode=chat/plan → call_chat（DS 单一入口，按 mode 切 prompt）
+                          → 闲聊模式：纯文本输出，无信号块
+                          → 计划模式：注册 function calling 工具（query_tasks / query_stats /
+                             query_project / query_schedule / create_tasks / delete_task(s)），
+                             DS 按需自调；输出末尾可能带 ---judgment---{"confirmed": true}
+每 20 轮用户消息后端异步跑 update_ai_memory（BackgroundTasks），提取印象 + 每日快照 + 项目摘要
 ```
 
-**核心原则：DS 只负责聊天和观察，推不推任务由 Python 决定。** 这样 DS 不会因为惦记推任务而破坏聊天自然感。
-
-**触发规则（保守策略，不确定时不触发）：**
-- work + wants_help → 触发（rest 不触发，v4.1 改动）
-- work + wants_to_start → 触发（用户主动要开始，v4.2 新增）
-- work + frustrated → 不触发（先接住情绪）
-- life + 任何 → 不触发（生活行程不管理）
-- 没提到具体事项 → 不触发
-
-**守门校验是纯 Python 代码，不调用 LLM。** 守门校验只在 call_task 结果上触发。
+**v4 遗留（已清）**：v4 的"call_chat 出信号 → Python 判断 → call_task 推任务"三段式已在
+2026-04-22 全面退役，rules_engine 只剩 L1 单测保护的纯函数残留。详见 docs/死代码清理清单.md。
 
 ## 聊天 Prompt 设计（v4 基线 → v4.2.1 回退，2026-04-05）
 

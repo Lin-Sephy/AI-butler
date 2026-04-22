@@ -24,7 +24,6 @@ from db.database import (
     get_tasks_recent, get_tasks_by_project,
 )
 from core.plan_tools import _tool_query_stats
-from core.plan_extractor import extract_tasks_from_conversation
 from core.auth import get_current_user_id
 from core.memory import (
     update_ai_memory, get_filtered_daily_memo, bump_on_mention,
@@ -68,10 +67,6 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
-    signal: dict
-    task_recommendation: dict | None = None
-    show_action_buttons: bool = False
-    energy_confirm_needed: bool = False
     confirmed: bool = False  # v5 计划模式：DS 是否判定用户已定稿
     created_tasks: list[dict] = []  # v5 计划模式：本轮 create_tasks 工具写入的任务，前端弹窗用
 
@@ -90,10 +85,6 @@ class ProjectUpdateRequest(BaseModel):
 
 class DailyRoutineRequest(BaseModel):
     routine: str
-
-
-class PlanExtractRequest(BaseModel):
-    session_id: str
 
 
 class TaskActionRequest(BaseModel):
@@ -219,7 +210,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
         )
     except Exception as e:
         logging.error(f"聊天调用出错: {type(e).__name__}: {e}")
-        chat_result = {"reply": "哎呀，出了点小问题。你再说一次？", "signal": {}, "confirmed": False}
+        chat_result = {"reply": "哎呀，出了点小问题。你再说一次？", "confirmed": False}
 
     reply = chat_result["reply"]
     confirmed = chat_result.get("confirmed", False)
@@ -246,29 +237,9 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
 
     return ChatResponse(
         reply=reply,
-        signal={},  # v5 无信号块，保留字段为了前端不破
-        task_recommendation=None,
-        show_action_buttons=False,
-        energy_confirm_needed=False,
         confirmed=confirmed,
         created_tasks=chat_result.get("created_tasks") or [],
     )
-
-
-# ---------- 计划结构化提取（v5） ----------
-
-@app.post("/api/plan/extract")
-def plan_extract(req: PlanExtractRequest, user_id: str = Depends(get_current_user_id)):
-    """从对话中提取结构化 tasks，供前端展示让用户确认后批量写入。
-
-    DS 输出 confirmed: true 后，前端调这个端点。返回候选 tasks 列表，
-    前端让用户编辑（删除/改时长/改项目），确认后走 /api/task/record 批量写入。
-    """
-    history = load_session_messages(user_id, req.session_id)
-    if not history:
-        return {"tasks": []}
-    tasks = extract_tasks_from_conversation(user_id, history)
-    return {"tasks": tasks}
 
 
 # ---------- 任务操作接口 ----------
