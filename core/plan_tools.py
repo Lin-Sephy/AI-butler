@@ -66,13 +66,17 @@ PLAN_MODE_TOOLS = [
         "type": "function",
         "function": {
             "name": "query_tasks",
-            "description": "查最近几天的任务记录明细（哪天做了什么、做了多久、完成没有）",
+            "description": (
+                "查最近几天的任务记录明细（哪天做了什么、做了多久、完成没有）。"
+                "默认只看今天（和前端任务栏一致）；用户明确问昨天、最近几天或这周时才传 days。"
+                "abandoned 状态的任务只保留最近 2 天，更久远的查不到。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "days": {
                         "type": "integer",
-                        "description": "查询最近多少天，默认 7",
+                        "description": "查询最近多少天，默认 1（只看今天）",
                     },
                 },
             },
@@ -189,11 +193,11 @@ PLAN_MODE_TOOLS = [
 
 
 def _tool_query_tasks(user_id: str, args: dict) -> dict:
-    days = args.get("days", 7)
+    days = args.get("days", 1)
     try:
         days = int(days)
     except (TypeError, ValueError):
-        days = 7
+        days = 1
     days = max(1, min(30, days))
 
     tasks = get_tasks_recent(user_id, days=days)

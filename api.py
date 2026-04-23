@@ -22,7 +22,7 @@ from db.database import (
     get_full_profile, get_llm_config, save_llm_config,
     get_daily_routine, save_daily_routine,
     create_project, list_projects, get_project, update_project, delete_project,
-    get_tasks_recent, get_tasks_by_project,
+    get_tasks_recent, get_tasks_by_project, get_completed_tasks_all,
 )
 from core.plan_tools import _tool_query_stats
 from core.auth import get_current_user_id
@@ -35,7 +35,7 @@ from core.intent import call_chat
 from core.task_manager import (
     create_task, pause_task, resume_task, complete_task, abandon_task,
     get_active_task, update_task_minutes, update_task_keyword,
-    get_today_tasks, delete_task,
+    get_today_tasks, delete_task, restore_task,
     create_recurring_task, get_recurring_tasks, delete_recurring_task,
     spawn_daily_tasks, start_task as tm_start_task,
     create_scheduled_task, get_scheduled_tasks, get_due_scheduled_tasks,
@@ -170,11 +170,15 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     """
     mode = req.mode if req.mode in ("chat", "plan") else "chat"
 
-    # 保存用户消息
-    save_chat_message(user_id, req.session_id, "user", req.message)
+    # 保存用户消息（带当前 mode 标签，供后续按 mode 分流加载）
+    save_chat_message(user_id, req.session_id, "user", req.message, mode)
 
-    # 加载历史
-    history = load_session_messages(user_id, req.session_id)
+    # 加载历史 · 非对称过滤：
+    # - 闲聊模式：只拉 mode='chat'，防止 DS 看到 plan 模式 tool call 结果
+    #   然后幻觉出"你任务栏有 XX"这种不存在的事
+    # - 任务模式：拉全部（闲聊 + 任务），DS 需要完整上下文来排任务
+    history_mode = "chat" if mode == "chat" else None
+    history = load_session_messages(user_id, req.session_id, mode=history_mode)
     history = history[:-1]  # 排除刚保存的这条
 
     # 一次性 SELECT * 读 user_profile 所有字段，分发给各处用——替代原本的 4 次独立查询
@@ -222,7 +226,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     confirmed = chat_result.get("confirmed", False)
 
     # save_chat_message 走 INSERT 不走 upsert——等 reply 最终定版才写
-    save_chat_message(user_id, req.session_id, "assistant", reply)
+    save_chat_message(user_id, req.session_id, "assistant", reply, mode)
 
     # 关键词匹配（零 API 成本，闲聊模式下帮印象系统刷新计数）
     try:
@@ -308,6 +312,15 @@ def abandon(task_id: int, user_id: str = Depends(get_current_user_id)):
     task = abandon_task(user_id, task_id)
     save_action_log(user_id, recommendation=task.get("keyword", ""), user_action="abandon")
     return {"message": f"「{task.get('keyword', '')}」已放弃", "task": task}
+
+
+@app.post("/api/task/{task_id}/restore")
+def restore(task_id: int, user_id: str = Depends(get_current_user_id)):
+    """把 abandoned 任务恢复成 idle，重置 created_at。"""
+    task = restore_task(user_id, task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在或不在已放弃状态")
+    return {"message": f"「{task.get('keyword', '')}」已恢复", "task": task}
 
 
 @app.post("/api/task/{task_id}/duration")
@@ -479,7 +492,7 @@ def new_session(user_id: str = Depends(get_current_user_id)):
     """创建新会话。"""
     session_id = str(uuid.uuid4())
     greeting = "来啦～"
-    save_chat_message(user_id, session_id, "assistant", greeting)
+    save_chat_message(user_id, session_id, "assistant", greeting, "chat")
     return {"session_id": session_id, "greeting": greeting}
 
 
@@ -726,3 +739,141 @@ def recent_tasks(days: int = 7, user_id: str = Depends(get_current_user_id)):
 def stats_endpoint(user_id: str = Depends(get_current_user_id)):
     """复用 plan_tools 里的统计逻辑，前端第 4 页也吃这个接口。"""
     return _tool_query_stats(user_id, {})
+
+
+@app.get("/api/stats/dashboard")
+def stats_dashboard(user_id: str = Depends(get_current_user_id)):
+    """数据页一次性聚合：今日 / 任务分布（日周月）/ 24h 桶 / 30 天每日 / 累计。
+
+    不供 DS tool call 使用（那条走 /api/stats → _tool_query_stats，只返分布）。
+    纯 Python 聚合，不调 DS。所有时间戳统一转成北京时间后再聚合/比较。"""
+    from collections import Counter, defaultdict
+    from datetime import datetime, timedelta, timezone
+
+    CN_TZ = timezone(timedelta(hours=8))
+
+    def to_cn(iso):
+        """ISO 时间字符串 → aware datetime（北京时间）。
+        Supabase 返回可能是 UTC 带 Z，不转时区直接聚合会偏 8 小时。"""
+        if not iso:
+            return None
+        try:
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=CN_TZ)
+            else:
+                dt = dt.astimezone(CN_TZ)
+            return dt
+        except (ValueError, AttributeError):
+            return None
+
+    tasks_30d = get_tasks_recent(user_id, days=30)
+    tasks_all = get_completed_tasks_all(user_id)
+
+    now = now_cn()
+    today_str = now.strftime("%Y-%m-%d")
+    week_cutoff_dt = now - timedelta(days=7)
+
+    # ---- 时区归一的日期/时段工具 ----
+    def cn_date(t, field):
+        dt = to_cn(t.get(field))
+        return dt.strftime("%Y-%m-%d") if dt else None
+
+    def is_today(t):
+        return cn_date(t, "completed_at") == today_str
+
+    def is_this_week(t):
+        dt = to_cn(t.get("completed_at"))
+        return dt is not None and dt >= week_cutoff_dt
+
+    # ---- today ----
+    today_done = [
+        t for t in tasks_30d
+        if t.get("status") == "completed" and is_today(t)
+    ]
+    today_minutes = sum((t.get("default_minutes") or 0) for t in today_done)
+    today_kw = Counter(t["keyword"] for t in today_done if t.get("keyword"))
+    today_top = today_kw.most_common(1)[0][0] if today_kw else None
+
+    today_data = {
+        "total_minutes": today_minutes,
+        "tasks_completed": len(today_done),
+        "top_keyword": today_top,
+    }
+
+    # ---- distribution (day/week/month) ----
+    def distribution_for(predicate):
+        filtered = [
+            t for t in tasks_30d
+            if t.get("status") == "completed" and predicate(t)
+        ]
+        counter: Counter = Counter()
+        for t in filtered:
+            kw = t.get("keyword")
+            if kw:
+                counter[kw] += (t.get("default_minutes") or 0)
+        total = sum(counter.values())
+        items = [
+            {
+                "keyword": k,
+                "minutes": v,
+                "pct": round(v / total * 100, 1) if total else 0,
+            }
+            for k, v in counter.most_common()
+        ]
+        return {"total_minutes": total, "items": items}
+
+    distribution = {
+        "day": distribution_for(is_today),
+        "week": distribution_for(is_this_week),
+        "month": distribution_for(lambda t: True),
+    }
+
+    # ---- hours_24（按北京时间 started_at 的 hour 分桶）----
+    hours = [0] * 24
+    for t in tasks_30d:
+        if t.get("status") != "completed":
+            continue
+        dt = to_cn(t.get("started_at"))
+        if dt is None:
+            continue
+        hours[dt.hour] += (t.get("default_minutes") or 0)
+    hours_24 = [{"hour": h, "minutes": m} for h, m in enumerate(hours)]
+
+    # ---- days_30（按北京时间 completed_at 的日期分桶）----
+    day_minutes: dict = defaultdict(int)
+    for t in tasks_30d:
+        if t.get("status") != "completed":
+            continue
+        d = cn_date(t, "completed_at")
+        if not d:
+            continue
+        day_minutes[d] += (t.get("default_minutes") or 0)
+
+    days_30 = []
+    for i in range(30):
+        d = (now - timedelta(days=29 - i)).strftime("%Y-%m-%d")
+        days_30.append({"date": d, "minutes": day_minutes.get(d, 0)})
+
+    # ---- cumulative（全部 completed 历史，按北京时间）----
+    cum_days: set = set()
+    cum_minutes = 0
+    for t in tasks_all:
+        d = cn_date(t, "completed_at")
+        if d:
+            cum_days.add(d)
+            cum_minutes += (t.get("default_minutes") or 0)
+
+    cumulative = {
+        "total_days": len(cum_days),
+        "total_minutes": cum_minutes,
+    }
+
+    return {
+        "today": today_data,
+        "distribution": distribution,
+        "hours_24": hours_24,
+        "days_30": days_30,
+        "cumulative": cumulative,
+        "today_date": today_str,
+    }

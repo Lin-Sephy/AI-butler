@@ -8,8 +8,11 @@ v2 多用户改造（2026-04-15）：所有公开函数第一个参数都是 use
 from datetime import timedelta
 from db.database import _get, _post, _patch, _delete, now_cn
 
-# idle 任务留存天数：超过就自动结转为 abandoned，避免老 idle 堆积在今日视图里
-STALE_IDLE_DAYS = 2
+# idle 任务留存天数：超过就自动结转为 abandoned
+# 2026-04-23: 从 2 改 1——避免"数据库有但前端看不见"的僵尸态（前端只看 today，
+# idle 第 2 天就是这种僵尸态）。现在一过当天 idle 就转 abandoned，
+# abandoned 进前端"已放弃"折叠区（2 天内可恢复）
+STALE_IDLE_DAYS = 1
 
 
 def _get_task_by_id(user_id: str, task_id: int) -> dict:
@@ -131,20 +134,58 @@ def _sweep_stale_idle_tasks(user_id: str) -> None:
 
 
 def get_today_tasks(user_id: str) -> list[dict]:
-    """获取今天的所有任务（不含已放弃），按创建时间倒序。
+    """获取今日任务视图：活跃任务（今天 created_at 且非 abandoned）
+    + 最近 2 天 abandoned 任务（供前端"已放弃"折叠区 + 恢复按钮）。
 
-    读前先 sweep 一次陈年 idle——让今日视图永远只看到当天活跃任务，
-    不被昨天或更早遗留的未做任务污染。
+    读前先 sweep 一次陈年 idle——超过 STALE_IDLE_DAYS 的 idle 自动结转 abandoned。
     """
+    from db.database import ABANDONED_RETENTION_DAYS
+
     _sweep_stale_idle_tasks(user_id)
-    today_start = now_cn().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    return _get("task", {
+    now = now_cn()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    abandoned_cutoff = (now - timedelta(days=ABANDONED_RETENTION_DAYS)).isoformat()
+
+    # 今天创建的活跃任务（含 completed、排除 abandoned）
+    active = _get("task", {
         "user_id": f"eq.{user_id}",
         "created_at": f"gte.{today_start}",
         "status": "neq.abandoned",
         "select": "*",
         "order": "created_at.desc",
     })
+
+    # 最近 2 天被放弃的任务（手动放弃 + 自动结转都在这）
+    abandoned = _get("task", {
+        "user_id": f"eq.{user_id}",
+        "status": "eq.abandoned",
+        "completed_at": f"gte.{abandoned_cutoff}",
+        "select": "*",
+        "order": "completed_at.desc",
+    })
+
+    return active + abandoned
+
+
+def restore_task(user_id: str, task_id: int) -> dict | None:
+    """把 abandoned 任务恢复成 idle，重置 created_at = now。
+
+    不重置 created_at 会立刻又被 sweep 打回 abandoned（因为原 created_at 已超
+    STALE_IDLE_DAYS）。重置相当于"用户今天想重新开始做这件事"。
+    """
+    task = _get_task_by_id(user_id, task_id)
+    if not task or task.get("status") != "abandoned":
+        return None
+
+    now_iso = now_cn().isoformat()
+    return _patch("task", {
+        "id": f"eq.{task_id}",
+        "user_id": f"eq.{user_id}",
+    }, {
+        "status": "idle",
+        "created_at": now_iso,
+        "completed_at": None,
+    }, return_row=True)
 
 
 def get_executing_task(user_id: str) -> dict | None:

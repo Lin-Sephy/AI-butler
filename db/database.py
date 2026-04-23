@@ -269,28 +269,49 @@ def get_companion_profile(user_id: str) -> dict:
 
 # ---- chat_session CRUD ----
 
-def save_chat_message(user_id: str, session_id: str, role: str, content: str) -> None:
-    """保存一条聊天消息。"""
+def save_chat_message(user_id: str, session_id: str, role: str, content: str, mode: str = "chat") -> None:
+    """保存一条聊天消息。mode: 'chat' | 'plan'，用于后续分流加载。"""
     today = now_cn().strftime("%Y-%m-%d")
     _post("chat_session", {
         "user_id": user_id,
         "session_id": session_id,
         "role": role,
         "content": content,
+        "mode": mode,
         "session_date": today,
         "created_at": now_cn().isoformat(),
     }, return_row=False)
 
 
-def load_session_messages(user_id: str, session_id: str) -> list[dict]:
-    """加载指定 session 的所有聊天消息。"""
-    rows = _get("chat_session", {
+def load_session_messages(user_id: str, session_id: str, mode: str | None = None) -> list[dict]:
+    """加载指定 session 的聊天消息。
+
+    mode=None: 拉全部（给 UI 展示，每条带 mode 字段）
+    mode='chat': 只拉 mode='chat' 或 mode=NULL 的消息（老数据 NULL 视作闲聊）
+    mode='plan': 只拉 mode='plan' 的消息（严格；老数据不出现在 plan 历史里）
+    """
+    params = {
         "user_id": f"eq.{user_id}",
         "session_id": f"eq.{session_id}",
-        "select": "role,content",
+        "select": "role,content,mode",
         "order": "created_at.asc",
-    })
-    return [{"role": r["role"], "content": r["content"]} for r in rows]
+    }
+    if mode == "chat":
+        # PostgREST or 过滤：mode='chat' 或 mode IS NULL
+        params["or"] = "(mode.eq.chat,mode.is.null)"
+    elif mode == "plan":
+        params["mode"] = "eq.plan"
+    # mode=None 不加过滤，全量
+
+    rows = _get("chat_session", params)
+    return [
+        {
+            "role": r["role"],
+            "content": r["content"],
+            "mode": r.get("mode") or "chat",  # NULL 归一成 'chat'
+        }
+        for r in rows
+    ]
 
 
 # ---- 精力记录 CRUD ----
@@ -481,6 +502,16 @@ def get_tasks_recent(user_id: str, days: int = 7) -> list[dict]:
         if t.get("status") != "abandoned"
         or (t.get("completed_at") or "") >= abandoned_cutoff
     ]
+
+
+def get_completed_tasks_all(user_id: str) -> list[dict]:
+    """该用户所有 completed task 的 completed_at + default_minutes（供数据页累计统计）。
+    只拉必需两列，减少传输量；行数大时不会爆。"""
+    return _get("task", {
+        "user_id": f"eq.{user_id}",
+        "status": "eq.completed",
+        "select": "completed_at,default_minutes",
+    })
 
 
 def get_tasks_by_project(user_id: str, project_id: int) -> list[dict]:
