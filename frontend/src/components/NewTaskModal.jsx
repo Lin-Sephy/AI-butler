@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { useConfirm } from '../contexts/ConfirmContext.jsx'
 
 const MINUTE_OPTIONS = [25, 35, 45, 60, 90, 120]
 
 export default function NewTaskModal({ onSubmit, onClose }) {
+  const confirm = useConfirm()
   const [keyword, setKeyword] = useState('')
   const [minutes, setMinutes] = useState(25)
   const [customMinutes, setCustomMinutes] = useState('')
@@ -25,6 +27,12 @@ export default function NewTaskModal({ onSubmit, onClose }) {
     }
   }
 
+  // 遮罩点击：keyword 已填则 confirm 再关，避免误触丢输入（C-12）
+  async function handleBackdropClick() {
+    if (keyword.trim() && !await confirm('还没提交，确定关掉吗？')) return
+    onClose()
+  }
+
   return (
     <div
       style={{
@@ -33,7 +41,7 @@ export default function NewTaskModal({ onSubmit, onClose }) {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 24,
       }}
-      onClick={onClose}
+      onClick={handleBackdropClick}
     >
       <form
         onClick={e => e.stopPropagation()}

@@ -79,7 +79,7 @@ export function ChatProvider({ children }) {
           const { session_id, greeting } = await newSession()
           localStorage.setItem(SESSION_KEY, session_id)
           setSessionId(session_id)
-          setMessages(greeting ? [{ role: 'assistant', content: greeting }] : [])
+          setMessages(greeting ? [{ role: 'assistant', content: greeting, mode: 'chat' }] : [])
         }
       } catch (e) {
         setError(e.message)
@@ -94,11 +94,11 @@ export function ChatProvider({ children }) {
     async text => {
       if (!sessionId || !text.trim()) return
       setError(null)
-      // 本地乐观 append 用户消息
-      setMessages(m => [...m, { role: 'user', content: text }])
+      // 本地乐观 append 用户消息（带当前 mode 标签，UI 渲染时按 mode 分段）
+      setMessages(m => [...m, { role: 'user', content: text, mode }])
       try {
         const resp = await sendMessage({ message: text, sessionId, mode })
-        setMessages(m => [...m, { role: 'assistant', content: resp.reply }])
+        setMessages(m => [...m, { role: 'assistant', content: resp.reply, mode }])
         // 本轮 DS 通过 create_tasks 写入的任务（可能为空）
         const created = resp.created_tasks || []
         if (created.length > 0) {
@@ -128,7 +128,7 @@ export function ChatProvider({ children }) {
       const { session_id, greeting } = await newSession()
       localStorage.setItem(SESSION_KEY, session_id)
       setSessionId(session_id)
-      setMessages(greeting ? [{ role: 'assistant', content: greeting }] : [])
+      setMessages(greeting ? [{ role: 'assistant', content: greeting, mode: 'chat' }] : [])
       setPlanConfirmed(false)
     } catch (e) {
       setError(e.message)

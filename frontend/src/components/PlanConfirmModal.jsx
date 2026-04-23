@@ -74,7 +74,7 @@ export default function PlanConfirmModal({ initialTasks, onClose }) {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 24,
       }}
-      onClick={onClose}
+      /* 遮罩点击不关闭 —— 避免用户改任务名时误触丢改动（C-12 方案 A）*/
     >
       <div
         onClick={e => e.stopPropagation()}

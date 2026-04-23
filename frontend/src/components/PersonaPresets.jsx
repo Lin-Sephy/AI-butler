@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api.js'
+import { useConfirm } from '../contexts/ConfirmContext.jsx'
 
 // 摘要词写死在前端：后端 PERSONAS 顺序是 infp/intj/intp，对齐展示成"预设 1/2/3"
 const SUMMARIES = {
@@ -28,6 +29,7 @@ const DISPLAY_ORDER = ['infp', 'intj', 'intp']
 export default function PersonaPresets({ currentText, onPick }) {
   const [presets, setPresets] = useState(null)  // { infp: "...", intj: "...", intp: "..." }
   const [error, setError] = useState(null)
+  const confirm = useConfirm()
 
   useEffect(() => {
     apiFetch('/api/profile/persona_presets')
@@ -39,14 +41,14 @@ export default function PersonaPresets({ currentText, onPick }) {
       .catch(e => setError(e.message))
   }, [])
 
-  function handlePick(key) {
+  async function handlePick(key) {
     if (!presets) return
     const text = presets[key]
     if (!text) return
 
     // 非空 textarea 才提醒；如果当前已经是这段预设原文，也直接重填（等价空操作）
     if (currentText.trim() && currentText !== text) {
-      if (!window.confirm('会覆盖当前性格描述，确定？')) return
+      if (!await confirm('会覆盖当前性格描述，确定？')) return
     }
     onPick(text)
   }

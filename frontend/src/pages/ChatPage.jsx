@@ -13,8 +13,9 @@
  * 模式切换 UI（chat ↔ plan）和计划确认界面（planConfirmed 触发）由前端小克后续补。
  */
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Fragment } from 'react'
 import { useChat } from '../contexts/ChatContext.jsx'
+import { useConfirm } from '../contexts/ConfirmContext.jsx'
 import StoatHalf from '../components/StoatHalf.jsx'
 import ChatBubble from '../components/ChatBubble.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
@@ -39,6 +40,7 @@ export default function ChatPage() {
     messages, loading, error, send, resetSession, mode, setMode,
     sessionId, planConfirmed, lastCreatedTasks, clearPlanConfirmed,
   } = useChat()
+  const confirm = useConfirm()
 
   const [view, setView] = useState('main')   // 'main' | 'history'
   const [input, setInput] = useState('')
@@ -120,8 +122,8 @@ export default function ChatPage() {
         <IconBtn title="历史对话" onClick={() => setView('history')}>
           <HistoryIcon />
         </IconBtn>
-        <IconBtn title="新建对话" onClick={() => {
-          if (window.confirm('清空当前对话开新的？')) resetSession()
+        <IconBtn title="新建对话" onClick={async () => {
+          if (await confirm('清空当前对话开新的？')) resetSession()
         }}>
           <CirclePlus />
         </IconBtn>
@@ -273,6 +275,7 @@ export default function ChatPage() {
 
 function HistoryView({ messages, onBack, onNewSession, error }) {
   const endRef = useRef(null)
+  const confirm = useConfirm()
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   return (
@@ -292,8 +295,8 @@ function HistoryView({ messages, onBack, onNewSession, error }) {
           <span style={{ fontSize: 18, lineHeight: 1 }}>‹‹</span>
         </IconBtn>
         <div style={{ fontSize: 14, color: 'var(--color-subtle)' }}>对话历史</div>
-        <IconBtn title="新建对话" onClick={() => {
-          if (window.confirm('清空当前对话开新的？')) onNewSession()
+        <IconBtn title="新建对话" onClick={async () => {
+          if (await confirm('清空当前对话开新的？')) onNewSession()
         }}>
           <CirclePlus />
         </IconBtn>
@@ -313,13 +316,48 @@ function HistoryView({ messages, onBack, onNewSession, error }) {
               还没说过话呢
             </p>
           ) : (
-            messages.map((m, i) => (
-              <ChatBubble key={i} message={m} />
-            ))
+            messages.map((m, i) => {
+              const prev = i > 0 ? messages[i - 1] : null
+              const curMode = m.mode || 'chat'
+              const prevMode = prev ? (prev.mode || 'chat') : null
+              const showDivider = prev && prevMode !== curMode
+              return (
+                <Fragment key={i}>
+                  {showDivider && <ModeDivider mode={curMode} />}
+                  <ChatBubble message={m} />
+                </Fragment>
+              )
+            })
           )}
           <div ref={endRef} />
         </div>
       </main>
+    </div>
+  )
+}
+
+
+// ════════════ 模式分隔符（历史视图里相邻两条消息 mode 变化时插入） ════════════
+
+function ModeDivider({ mode }) {
+  const label = mode === 'plan' ? '任务模式' : '闲聊模式'
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        margin: '20px 4px 16px',
+        color: 'var(--color-muted)',
+        fontSize: 11,
+        letterSpacing: '0.12em',
+        userSelect: 'none',
+      }}
+      aria-label={`以下是${label}的对话`}
+    >
+      <div style={{ flex: 1, height: 1, background: 'var(--color-line-soft)' }} />
+      <span>— {label} —</span>
+      <div style={{ flex: 1, height: 1, background: 'var(--color-line-soft)' }} />
     </div>
   )
 }
@@ -577,11 +615,12 @@ function HistoryIcon() {
 }
 
 function CirclePlus() {
+  // viewBox 对齐 HistoryIcon / Gear 的 0 0 24 24
   return (
-    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-      <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.4" />
-      <line x1="10" y1="6" x2="10" y2="14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <line x1="6" y1="10" x2="14" y2="10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.4" />
+      <line x1="12" y1="8" x2="12" y2="16" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <line x1="8" y1="12" x2="16" y2="12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   )
 }
@@ -603,6 +642,7 @@ function CenterText({ children }) {
     <div style={{
       padding: '80px 0', textAlign: 'center',
       color: 'var(--color-subtle)',
+      fontSize: 14,
     }}>
       {children}
     </div>

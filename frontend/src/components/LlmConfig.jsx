@@ -19,6 +19,7 @@
 
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api.js'
+import { useConfirm } from '../contexts/ConfirmContext.jsx'
 
 // 预设服务商。key 用英文 id，label 是下拉展示名。
 const PROVIDERS = {
@@ -53,6 +54,7 @@ const PROVIDER_ORDER = ['deepseek', 'openai', 'zhipu', 'silicon', 'custom']
 
 
 export default function LlmConfig() {
+  const confirm = useConfirm()
   // 后端返回的状态
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -125,7 +127,7 @@ export default function LlmConfig() {
   }
 
   async function handleClear() {
-    if (!window.confirm('清空自带配置，回到用默认服务？')) return
+    if (!await confirm('清空自带配置，回到用默认服务？')) return
     setSaving(true)
     setSaveError(null)
     try {
@@ -146,7 +148,10 @@ export default function LlmConfig() {
   }
 
   if (loading) {
-    return <div style={{ fontSize: 13, color: 'var(--color-subtle)', padding: '8px 0' }}>
+    return <div style={{
+      fontSize: 14, color: 'var(--color-subtle)',
+      padding: '40px 0', textAlign: 'center',
+    }}>
       加载中…
     </div>
   }

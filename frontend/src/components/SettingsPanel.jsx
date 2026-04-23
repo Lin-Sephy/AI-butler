@@ -11,10 +11,12 @@
 
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { apiFetch } from '../lib/api.js'
+import { useConfirm } from '../contexts/ConfirmContext.jsx'
 import PersonaPresets from './PersonaPresets.jsx'
 import LlmConfig from './LlmConfig.jsx'
 
 export default function SettingsPanel({ onClose }) {
+  const confirm = useConfirm()
   // ─── 可编辑字段（受 dirty 跟踪） ───
   const [name, setName] = useState('')
   const [persona, setPersona] = useState('')
@@ -86,9 +88,9 @@ export default function SettingsPanel({ onClose }) {
   }
 
   // ─── 关闭（检查 dirty） ───
-  function handleClose() {
+  async function handleClose() {
     if (isDirty()) {
-      if (!window.confirm('有改动没保存，确定关闭？')) return
+      if (!await confirm('有改动没保存，确定关闭？')) return
     }
     onClose()
   }
@@ -149,7 +151,11 @@ export default function SettingsPanel({ onClose }) {
 
   // ─── 清空 AI 记忆 ───
   async function handleClearAiMemo() {
-    if (!window.confirm('清空小白对你的印象？这个不可撤销。')) return
+    if (!await confirm({
+      message: '清空小白对你的印象？这个不可撤销。',
+      confirmText: '清空',
+      danger: true,
+    })) return
     setAiMemoLoading(true)
     try {
       await apiFetch('/api/memo/ai', { method: 'DELETE' })
@@ -208,9 +214,12 @@ export default function SettingsPanel({ onClose }) {
         {/* 滚动区 */}
         <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>
           {loading ? (
-            <p style={{ color: 'var(--color-subtle)', fontSize: 14, padding: '20px 0' }}>
+            <div style={{
+              color: 'var(--color-subtle)', fontSize: 14,
+              padding: '40px 0', textAlign: 'center',
+            }}>
               加载中…
-            </p>
+            </div>
           ) : loadError ? (
             <div>
               <ErrorBanner>{loadError}</ErrorBanner>
@@ -297,7 +306,7 @@ export default function SettingsPanel({ onClose }) {
                 }
               >
                 <textarea
-                  value={aiMemo || '（还没有印象）'}
+                  value={aiMemo || '还在慢慢了解你呢'}
                   readOnly
                   rows={4}
                   style={{

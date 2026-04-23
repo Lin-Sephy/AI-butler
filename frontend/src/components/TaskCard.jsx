@@ -3,7 +3,7 @@ import { useState } from 'react'
 const STATUS_CONFIG = {
   idle: {
     dotStyle: { background: 'transparent', border: '2px solid var(--color-accent)' },
-    chipText: null, // 用 task_type (work/rest)
+    chipText: '待完成',
     chipStyle: {
       background: 'var(--color-accent-soft)',
       color: 'var(--color-primary)',
@@ -46,9 +46,16 @@ const STATUS_CONFIG = {
       border: '1px solid hsl(var(--text-h), var(--text-s), 85%)',
     },
   },
+  abandoned: {
+    dotStyle: { background: 'transparent', border: '2px solid hsl(var(--text-h), var(--text-s), 78%)' },
+    chipText: '已放弃',
+    chipStyle: {
+      background: 'hsl(var(--text-h), var(--text-s), 92%)',
+      color: 'var(--color-muted)',
+      border: '1px solid hsl(var(--text-h), var(--text-s), 82%)',
+    },
+  },
 }
-
-const TYPE_LABEL = { work: 'work', rest: 'rest' }
 
 function formatScheduledTime(iso) {
   if (!iso) return ''
@@ -57,12 +64,13 @@ function formatScheduledTime(iso) {
   return m ? `${m[1]}:${m[2]}` : ''
 }
 
-export default function TaskCard({ task, onStart, onPause, onResume, onComplete, onAbandon, onDelete }) {
+export default function TaskCard({ task, onStart, onPause, onResume, onComplete, onAbandon, onDelete, onRestore }) {
   const [busy, setBusy] = useState(false)
   const status = task.status || 'idle'
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.idle
   const isExecuting = status === 'executing'
   const isCompleted = status === 'completed'
+  const isAbandoned = status === 'abandoned'
 
   async function act(fn) {
     if (busy) return
@@ -82,7 +90,7 @@ export default function TaskCard({ task, onStart, onPause, onResume, onComplete,
         marginBottom: 12,
         border: `1px solid ${isExecuting ? 'var(--color-primary)' : 'var(--color-line)'}`,
         borderLeft: isExecuting ? '3px solid var(--color-primary)' : undefined,
-        opacity: isCompleted ? 0.7 : 1,
+        opacity: isCompleted ? 0.7 : (isAbandoned ? 0.6 : 1),
         transition: 'var(--transition) ease-out',
       }}
     >
@@ -96,8 +104,8 @@ export default function TaskCard({ task, onStart, onPause, onResume, onComplete,
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
           fontSize: 16, fontWeight: 400, marginBottom: 3,
-          textDecoration: isCompleted ? 'line-through' : 'none',
-          color: isCompleted ? 'var(--color-subtle)' : 'var(--color-text)',
+          textDecoration: (isCompleted || isAbandoned) ? 'line-through' : 'none',
+          color: (isCompleted || isAbandoned) ? 'var(--color-subtle)' : 'var(--color-text)',
         }}>
           {task.keyword}
         </div>
@@ -116,7 +124,7 @@ export default function TaskCard({ task, onStart, onPause, onResume, onComplete,
             fontSize: 11,
             ...cfg.chipStyle,
           }}>
-            {cfg.chipText || TYPE_LABEL[task.task_type] || task.task_type}
+            {cfg.chipText}
           </span>
         </div>
       </div>
@@ -145,6 +153,12 @@ export default function TaskCard({ task, onStart, onPause, onResume, onComplete,
         )}
         {status === 'completed' && (
           <ActionBtn label="删除" onClick={() => act(onDelete)} disabled={busy} subtle />
+        )}
+        {status === 'abandoned' && (
+          <>
+            <ActionBtn label="恢复" onClick={() => act(onRestore)} disabled={busy} />
+            <ActionBtn label="删除" onClick={() => act(onDelete)} disabled={busy} subtle />
+          </>
         )}
       </div>
     </div>

@@ -72,9 +72,9 @@ function ThinkingDots() {
   return (
     <div style={{
       position: 'absolute',
-      top: -10,
+      top: 4,
       left: '50%',
-      transform: 'translateX(40%)',
+      transform: 'translateX(30%)',
       background: 'white',
       border: `1.5px solid var(--color-text)`,
       borderRadius: 14,

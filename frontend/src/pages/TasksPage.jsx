@@ -11,6 +11,7 @@ export default function TasksPage() {
   const [showNewTask, setShowNewTask] = useState(false)
   const [focusTask, setFocusTask] = useState(null)
   const [completedOpen, setCompletedOpen] = useState(false)
+  const [abandonedOpen, setAbandonedOpen] = useState(false)
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -59,6 +60,15 @@ export default function TasksPage() {
     }
   }
 
+  async function handleRestore(taskId) {
+    try {
+      await apiFetch(`/api/task/${taskId}/restore`, { method: 'POST' })
+      await fetchTasks()
+    } catch (e) {
+      alert(e.message)
+    }
+  }
+
   async function handleNewTask(data) {
     await apiFetch('/api/task/record', { method: 'POST', body: data })
     await fetchTasks()
@@ -71,6 +81,7 @@ export default function TasksPage() {
     .sort((a, b) => (a.scheduled_at || '').localeCompare(b.scheduled_at || ''))
   const idle = tasks.filter(t => t.status === 'idle')
   const completed = tasks.filter(t => t.status === 'completed')
+  const abandoned = tasks.filter(t => t.status === 'abandoned')
   const activeTasks = [...executing, ...paused, ...scheduled, ...idle]
 
   if (loading) {
@@ -117,7 +128,7 @@ export default function TasksPage() {
       )}
 
       {/* 活跃任务列表 */}
-      {activeTasks.length === 0 && completed.length === 0 ? (
+      {activeTasks.length === 0 && completed.length === 0 && abandoned.length === 0 ? (
         <div style={{
           padding: '56px 32px',
           textAlign: 'center',
@@ -176,6 +187,38 @@ export default function TasksPage() {
               ))}
             </>
           )}
+
+          {/* 已放弃折叠 · 2 天内可恢复 · 2 天后自动消失 */}
+          {abandoned.length > 0 && (
+            <>
+              <button
+                onClick={() => setAbandonedOpen(!abandonedOpen)}
+                style={{
+                  marginTop: 4,
+                  padding: '8px 0',
+                  background: 'transparent', border: 'none',
+                  color: 'var(--color-muted)',
+                  fontSize: 13, fontFamily: 'inherit',
+                  cursor: 'pointer',
+                }}
+              >
+                已放弃 {abandoned.length} 个 {abandonedOpen ? '▲' : '▼'}
+              </button>
+              {abandonedOpen && abandoned.map(t => (
+                <TaskCard
+                  key={t.id}
+                  task={t}
+                  onStart={() => {}}
+                  onPause={() => {}}
+                  onResume={() => {}}
+                  onComplete={() => {}}
+                  onAbandon={() => {}}
+                  onRestore={handleRestore}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </>
+          )}
         </>
       )}
 
@@ -225,6 +268,7 @@ function CenterText({ children }) {
     <div style={{
       padding: '80px 0', textAlign: 'center',
       color: 'var(--color-subtle)',
+      fontSize: 14,
     }}>
       {children}
     </div>
