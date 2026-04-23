@@ -9,6 +9,8 @@ import { useState, useEffect } from 'react'
 import { useAuth } from './contexts/AuthContext.jsx'
 import TasksPage from './pages/TasksPage.jsx'
 import ChatPage from './pages/ChatPage.jsx'
+import StatsPage from './pages/StatsPage.jsx'
+import MePage from './pages/MePage.jsx'
 
 const TABS = [
   { key: 'tasks',  label: '任务' },
@@ -58,8 +60,8 @@ export default function App() {
       <main style={{ flex: 1, padding: '40px 24px', maxWidth: 720, margin: '0 auto', width: '100%' }}>
         {tab === 'tasks' && <TasksPage />}
         {tab === 'chat'  && <ChatPage />}
-        {tab === 'stats' && <Placeholder title="数据" />}
-        {tab === 'me'    && <Placeholder title="我的" />}
+        {tab === 'stats' && <StatsPage />}
+        {tab === 'me'    && <MePage />}
       </main>
       <TabBar current={tab} onChange={setTab} />
     </div>
@@ -110,6 +112,7 @@ function CenterMessage({ children }) {
       alignItems: 'center', justifyContent: 'center',
       padding: 24, textAlign: 'center',
       color: 'var(--color-subtle)',
+      fontSize: 14,
     }}>
       {children}
     </div>
