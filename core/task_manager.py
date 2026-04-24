@@ -25,7 +25,7 @@ def _get_task_by_id(user_id: str, task_id: int) -> dict:
     return rows[0] if rows else {}
 
 
-def create_task(user_id: str, keyword: str, combo: str, energy_level: int,
+def create_task(user_id: str, keyword: str, combo: str, energy_level: int | None = None,
                 suggested_minutes: int | None = None,
                 task_type: str = "work",
                 auto_start: bool = True,
@@ -282,7 +282,7 @@ def spawn_daily_tasks(user_id: str) -> None:
             }, return_row=False)
 
 
-def start_task(user_id: str, task_id: int, energy_level: int,
+def start_task(user_id: str, task_id: int, energy_level: int | None = None,
                allowed_from: tuple = ("idle", "scheduled")) -> dict:
     """启动一个任务：idle / scheduled → executing。
 

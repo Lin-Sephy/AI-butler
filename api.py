@@ -30,7 +30,6 @@ from core.memory import (
     update_ai_memory, get_filtered_daily_memo, bump_on_mention,
     get_confirmed_impressions_text, get_impressions_display,
 )
-from core.energy import get_current_energy, update_energy, ENERGY_LEVELS
 from core.intent import call_chat
 from core.task_manager import (
     create_task, pause_task, resume_task, complete_task, abandon_task,
@@ -97,7 +96,6 @@ class DailyRoutineRequest(BaseModel):
 
 class TaskActionRequest(BaseModel):
     task_id: int
-    energy_level: int | None = None
 
 
 class RecordTaskRequest(BaseModel):
@@ -105,12 +103,6 @@ class RecordTaskRequest(BaseModel):
     suggested_minutes: int | None = None
     task_type: str = "work"
     detail: str = ""
-    energy_level: int | None = None
-
-
-class EnergyUpdateRequest(BaseModel):
-    energy_level: int
-    source: str = "manual"
 
 
 class MemoRequest(BaseModel):
@@ -257,18 +249,15 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
 @app.post("/api/task/record")
 def record_task(req: RecordTaskRequest, user_id: str = Depends(get_current_user_id)):
     """记录任务到任务栏（idle 状态，不自动开始）。"""
-    energy_level = req.energy_level or get_current_energy(user_id)["energy_level"]
     task = create_task(
         user_id,
         keyword=req.task_keyword, combo="",
-        energy_level=energy_level,
         suggested_minutes=req.suggested_minutes,
         task_type=req.task_type,
         auto_start=False,
         detail=req.detail,
     )
-    save_action_log(user_id, energy=energy_level,
-                    recommendation=req.task_keyword, user_action="record")
+    save_action_log(user_id, recommendation=req.task_keyword, user_action="record")
     return {"message": f"已记录「{req.task_keyword}」", "task": task}
 
 
@@ -276,9 +265,8 @@ def record_task(req: RecordTaskRequest, user_id: str = Depends(get_current_user_
 def start(task_id: int, req: TaskActionRequest | None = None,
           user_id: str = Depends(get_current_user_id)):
     """开始一个 idle 或 scheduled 任务。"""
-    energy_level = (req.energy_level if req else None) or get_current_energy(user_id)["energy_level"]
     try:
-        task = tm_start_task(user_id, task_id, energy_level)
+        task = tm_start_task(user_id, task_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"message": f"开始「{task['keyword']}」！", "task": task}
@@ -385,11 +373,10 @@ def due_tasks(user_id: str = Depends(get_current_user_id)):
 @app.post("/api/tasks/scheduled")
 def create_scheduled(req: ScheduledTaskRequest, user_id: str = Depends(get_current_user_id)):
     """创建预定任务。"""
-    energy_level = get_current_energy(user_id)["energy_level"]
     task = create_scheduled_task(
         user_id,
         keyword=req.keyword, scheduled_at=req.scheduled_at,
-        combo="", energy_level=energy_level,
+        combo="",
         suggested_minutes=req.suggested_minutes, task_type=req.task_type,
     )
     return {"message": f"已预定「{req.keyword}」", "task": task}
@@ -416,37 +403,6 @@ def remove_recurring(rec_id: int, user_id: str = Depends(get_current_user_id)):
     """删除循环任务。"""
     delete_recurring_task(user_id, rec_id)
     return {"message": "已删除"}
-
-
-# ---------- 精力系统接口 ----------
-
-@app.get("/api/energy")
-def get_energy(user_id: str = Depends(get_current_user_id)):
-    """获取当前精力状态。"""
-    energy = get_current_energy(user_id)
-    level = energy["energy_level"]
-    info = ENERGY_LEVELS[level]
-    return {
-        "energy_level": level,
-        "source": energy["source"],
-        "label": info["label"],
-        "color": info["color"],
-        "levels": {k: v for k, v in ENERGY_LEVELS.items()},
-    }
-
-
-@app.post("/api/energy")
-def set_energy(req: EnergyUpdateRequest, user_id: str = Depends(get_current_user_id)):
-    """手动设置精力值。"""
-    update_energy(user_id, req.energy_level, req.source)
-    level = req.energy_level
-    info = ENERGY_LEVELS[level]
-    return {
-        "energy_level": level,
-        "source": req.source,
-        "label": info["label"],
-        "color": info["color"],
-    }
 
 
 # ---------- 记忆库接口 ----------

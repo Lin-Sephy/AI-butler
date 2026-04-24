@@ -68,8 +68,12 @@ _HEADERS = {
 }
 
 
-def _get(table: str, params: dict | None = None) -> list[dict]:
-    """GET 请求，返回行列表。"""
+def _get(table: str, params: dict | list | None = None) -> list[dict]:
+    """GET 请求，返回行列表。
+
+    params 支持 dict 或 list[tuple]；后者用于同一字段两个过滤条件
+    （例如 scheduled_at gte.X + scheduled_at lte.Y 查一天范围）。
+    """
     resp = _with_retry("GET", f"{_BASE_URL}/{table}", headers=_HEADERS, params=params or {})
     resp.raise_for_status()
     return resp.json()
@@ -314,60 +318,6 @@ def load_session_messages(user_id: str, session_id: str, mode: str | None = None
         }
         for r in rows
     ]
-
-
-# ---- 精力记录 CRUD ----
-
-def save_energy(user_id: str, energy_level: int, source: str) -> dict:
-    """写入一条精力记录，返回写入结果。"""
-    now = now_cn().isoformat()
-    _post("energy_log", {
-        "user_id": user_id,
-        "energy_level": energy_level,
-        "source": source,
-        "created_at": now,
-    }, return_row=False)
-    return {"energy_level": energy_level, "source": source, "updated_at": now}
-
-
-def get_today_energy(user_id: str) -> dict | None:
-    """获取今天最新一条精力记录，没有则返回 None。"""
-    today_start = now_cn().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    rows = _get("energy_log", {
-        "user_id": f"eq.{user_id}",
-        "created_at": f"gte.{today_start}",
-        "select": "energy_level,source,created_at",
-        "order": "created_at.desc",
-        "limit": "1",
-    })
-    if rows:
-        return {
-            "energy_level": rows[0]["energy_level"],
-            "source": rows[0]["source"],
-            "updated_at": rows[0]["created_at"],
-        }
-    return None
-
-
-def get_avg_energy_7d(user_id: str) -> float | None:
-    """过去 7 天精力均值（每天取最后一条），无数据返回 None。"""
-    seven_days_ago = (now_cn() - timedelta(days=7)).isoformat()
-    rows = _get("energy_log", {
-        "user_id": f"eq.{user_id}",
-        "created_at": f"gte.{seven_days_ago}",
-        "select": "energy_level,created_at",
-        "order": "created_at.desc",
-    })
-    if not rows:
-        return None
-
-    daily = {}
-    for r in rows:
-        day = r["created_at"][:10]  # YYYY-MM-DD
-        if day not in daily:
-            daily[day] = r["energy_level"]
-
-    return sum(daily.values()) / len(daily)
 
 
 # ---- action_log CRUD ----

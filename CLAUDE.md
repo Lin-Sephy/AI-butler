@@ -98,22 +98,25 @@ ai-butler/
 ├── .env                    # 环境变量（.gitignore 已排除）
 ├── CLAUDE.md               # 本文件
 ├── core/
-│   ├── energy.py           # 精力系统（三级采集策略、五档定义）
-│   ├── rules_engine.py     # 规则引擎（任务触发判断、守门校验、兜底回复）
-│   ├── intent.py           # DeepSeek 调用（call_chat + call_task）
+│   ├── intent.py           # DeepSeek 调用（v5 双模式 call_chat：闲聊 + function calling 计划）
+│   ├── plan_tools.py       # 计划模式 function calling 工具集（query / delete / create_tasks）
 │   ├── task_manager.py     # 任务状态流转 + 循环任务管理
-│   └── memory.py           # AI 自动记忆（两级印象 + 每日快照）
+│   ├── memory.py           # AI 自动记忆（两级印象 + 每日快照）
+│   ├── auth.py             # JWT 鉴权（get_current_user_id）
+│   ├── crypto.py           # BYOK 用户 api_key Fernet 加密
+│   └── rules_engine.py     # v4 遗留模板，v5 未调用（去留待决，见死代码清单 B5）
 ├── db/
-│   └── database.py         # 数据访问层（MVP: SQLite / webapp-migration: Supabase REST API）
+│   └── database.py         # 数据访问层（Supabase REST API via httpx）
 ├── prompts/
-│   └── system_prompt.py    # 双 prompt（聊天 + 任务 + 人设变量块）
-├── frontend/               # React + Vite 骨架（v2 前端）
+│   └── system_prompt.py    # v5 单一聊天 prompt（IDENTITY + HONESTY + 可选 PERSONA + 可插拔 PLAN_MODULE）
+├── frontend/               # React + Vite + SVG（v2 前端）
 ├── anchor_memory_lib/      # ANCHOR 记忆系统代码
 ├── anchor_db/              # ANCHOR 数据
 ├── docs/                   # 产品文档 + 决定归档 + 对话记录 + 白鼬素材
 └── tests/
-    ├── test_rules_engine.py      # should_trigger_task / validate_reply / check_energy_drift 等
-    └── test_memory.py            # _maybe_promote / _apply_decay / _extract_keywords
+    ├── test_plan_tools.py        # function calling 工具单测（query / delete / create）
+    ├── test_memory.py            # _maybe_promote / _apply_decay / _extract_keywords
+    └── test_rules_engine.py      # v4 遗留测试，跟 rules_engine.py 一起待决（B5）
 ```
 
 ## 核心架构：v5 双模式聊天 + function calling（2026-04-22 现状）
@@ -168,11 +171,11 @@ HONESTY_RULES（硬约束：不编日期 / 事件 / 能力；被纠正直接认�
 
 - 前端 `PlanConfirmModal` 在 `confirmed: true` **且** 本轮 `created_tasks` 非空时弹窗，让用户对**已落库**的新任务做事后编辑（改名 / 改时长 / 删除）
 
-**v4 遗留（2026-04-22 全清）**：`call_chat` 的 `---signal---` 六字段信号块 + `call_task` JSON 输出 + rules_engine 触发判断 + "记录/再聊聊"按钮 + 精力档位相关全部退役，详见 `docs/死代码清理清单.md`。
+**v4 遗留（2026-04-22 + 04-24 全清）**：`call_chat` 的 `---signal---` 六字段信号块 + `call_task` JSON 输出 + rules_engine 触发判断 + "记录/再聊聊"按钮全部退役（04-22）；精力档位（`core/energy.py` 文件 + `/api/energy` 端点 + `task.energy_at_start` 写入链路）04-24 全链路清干净，仅 DB `energy_log` 表 + `task.energy_at_start` 字段保留待 migration 窗口 DROP。详见 `docs/死代码清理清单.md`。
 
 ## 数据库表（v5 现状）
 
-**核心 6 张（MVP 起就有）：** user_profile / task / recurring_task / energy_log / action_log / chat_session
+**核心 5 张活跃 + 1 张废弃：** user_profile / task / recurring_task / action_log / chat_session；`energy_log` 已随 v5 精力档位退役（04-24），下次 migration 窗口 DROP
 
 **v5 新增 + 改动：**
 - `project`（新建，v5 新增）：项目管理（name / keywords / summary）
@@ -191,19 +194,29 @@ Streamlit MVP 阶段（第 0 步到 v4.2.1，2026-03 到 2026-04-05）已全部�
 
 ## 详细文档索引
 
-**Web App v2 核心文档（当前方向）：**
-- `docs/plan.md` — v2 产品设计主文档
-- `docs/桌宠设计.md` — 白鼬 11 状态 + 素材映射 + 触发逻辑
-- `docs/功能去留清单.md` — Streamlit MVP → v2 的留/砍/改形态 + 数据耦合
-- `docs/references/白鼬/` — 动作参考素材（80+ 张按动作命名归档）
-- `docs/decisions/` — 旧 plan 归档（v0.1 / v1.0 / v1.1 推翻过程）
+> **入口提示**：`docs/README.md` 有"改 X 类问题先看 Y"的导航表，查特定话题从那查起最快。下面这份是分类速览。
 
-**MVP 阶段产品文档（仍可查阅）：**
-- 产品蓝图 v4 — 整体愿景、产品原则、竞品定位、护城河
-- MVP 需求文档 v2 — 精力系统完整设计、场景走读、页面/组件/接口定义、数据模型
-- Prompt 设计文档 v1 — 三阶段流水线详细 Prompt（已被 v2 替代，仅供参考）
-- AI小管家_SystemPrompt_v2_final.md — 当前使用的 prompt 设计
-- 技术研究报告 — 模型选型对比、成本估算、竞品分析
+**上线前活跃（跟阶段）：**
+- `docs/上线前清单.md` — 阻塞 / 安全 / 体验 / 调性 / 上线后 五档待办
+- `docs/plan/给下一个小克.md` — 接手交接：v5 核心约束 + 参考组件 + 前端潜规则
+
+**产品主文档（`docs/plan/`）：**
+- `plan.md` — v2 产品设计主文档（视觉 / 页面结构 / 交互原则）
+- `桌宠设计.md` — 白鼬 11 状态 + 素材映射 + 触发逻辑
+- `功能去留清单.md` — Streamlit MVP → v2 的留 / 砍 / 改形态
+- `死代码清理清单.md` — 已清 / 待清的遗留代码点
+- `2026-04-20_v5.0_开工文档.md` — v5 架构重构笔记
+
+**视角 / 决策 / 素材：**
+- `docs/用户视角审查/` — A/B/C/D 四视角审查（有 `README.md` 索引）
+- `docs/references/` — `白鼬/`（80+ 动作图）+ `竞品/` + `设计稿/`
+- `docs/portfolio/` — 设计决策回顾（如 prompt 分层架构发现）
+- `docs/changelog-history.md` — MVP → v4.2 → v5 迭代史
+
+**归档（查阅，不活跃）：**
+- `docs/产品文档/` — 老 docx（蓝图 v4 / MVP 需求 v2 / Prompt v1 / 技术研究）
+- `docs/decisions-history/` — 旧 plan 归档（v0.1 / v1.0 / v1.1 推翻过程）
+- `docs/conversations/` — 对话记录
 
 ## 绝对禁止
 
