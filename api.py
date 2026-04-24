@@ -723,8 +723,8 @@ def stats_dashboard(user_id: str = Depends(get_current_user_id)):
         except (ValueError, AttributeError):
             return None
 
-    tasks_30d = get_tasks_recent(user_id, days=30)
-    tasks_all = get_completed_tasks_all(user_id)
+    tasks_30d = [t for t in get_tasks_recent(user_id, days=30) if (t.get("default_minutes") or 0) >= 1]
+    tasks_all = [t for t in get_completed_tasks_all(user_id) if (t.get("default_minutes") or 0) >= 1]
 
     now = now_cn()
     today_str = now.strftime("%Y-%m-%d")

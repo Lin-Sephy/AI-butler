@@ -188,9 +188,30 @@ function TaskRow({ task, onChangeKeyword, onChangeMinutes, onDelete }) {
       padding: '14px 16px',
       marginBottom: 10,
       background: 'var(--color-surface)',
+      position: 'relative',
     }}>
-      {/* 第一行：keyword input + 删除 */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 10 }}>
+      <button
+        type="button"
+        onClick={onDelete}
+        title="删除"
+        style={{
+          position: 'absolute', top: 10, right: 10,
+          width: 22, height: 22,
+          borderRadius: '50%',
+          border: '1px solid var(--color-line)',
+          background: 'transparent',
+          color: 'var(--color-subtle)',
+          fontSize: 13, fontFamily: 'inherit',
+          cursor: 'pointer',
+          lineHeight: 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 0,
+        }}
+      >
+        ×
+      </button>
+      {/* keyword */}
+      <div style={{ marginBottom: 10, paddingRight: 30 }}>
         <input
           value={localKw}
           onChange={e => setLocalKw(e.target.value)}
@@ -198,32 +219,17 @@ function TaskRow({ task, onChangeKeyword, onChangeMinutes, onDelete }) {
           onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
           placeholder="做什么"
           style={{
-            flex: 1,
-            padding: '8px 12px',
+            width: `${Math.max((localKw.length || 2) + 1, 3)}em`,
+            padding: '6px 12px',
             borderRadius: 'var(--radius)',
             border: '1px solid var(--color-line)',
             background: 'var(--color-base)',
             font: 'inherit', color: 'var(--color-text)',
             outline: 'none',
+            maxWidth: '100%',
+            boxSizing: 'content-box',
           }}
         />
-        <button
-          type="button"
-          onClick={onDelete}
-          title="删除"
-          style={{
-            width: 32, height: 32,
-            borderRadius: 'var(--radius)',
-            border: '1px solid var(--color-line)',
-            background: 'transparent',
-            color: 'var(--color-subtle)',
-            fontSize: 18, fontFamily: 'inherit',
-            cursor: 'pointer',
-            lineHeight: 1,
-          }}
-        >
-          ×
-        </button>
       </div>
 
       {/* 第二行：时长 chip + 自定义 */}

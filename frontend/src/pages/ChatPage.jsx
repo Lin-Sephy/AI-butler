@@ -148,7 +148,7 @@ export default function ChatPage() {
         flex: 1,
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
-        padding: '20px 20px 0',
+        padding: '20px 20px 100px',
         position: 'relative',
         background: 'var(--color-base)',
         gap: 12,
