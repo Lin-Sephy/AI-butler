@@ -8,6 +8,7 @@ v5.0 重构（2026-04-20，见开工文档）：
 """
 
 import json
+import re
 import logging
 import httpx
 from openai import OpenAI
@@ -56,6 +57,12 @@ def _get_client(user_llm: dict | None = None) -> tuple[OpenAI, str]:
         timeout=httpx.Timeout(60.0, connect=10.0),
         max_retries=1,
     ), API_CONFIG["model"]
+
+
+_CLAIM_KEYWORDS = re.compile(r"建好了|已.*创建|已.*安排|帮你.*建|已.*加入|写进去了|录入了")
+
+def _claims_created(text: str) -> bool:
+    return bool(_CLAIM_KEYWORDS.search(text))
 
 
 def _parse_chat_reply(raw: str, mode: str = "chat") -> tuple[str, bool]:
@@ -197,6 +204,45 @@ def call_chat(user_input: str,
             logging.warning(f"[Chat] function calling 超过 {MAX_TOOL_ROUNDS} 轮未收敛")
 
         logging.warning(f"[Chat raw] {raw_final[:300]}")
+
+        # 幻觉检测：DS 嘴上说建了任务但没调 create_tasks → 追一轮让它补调
+        if mode == "plan" and not created_tasks and _claims_created(raw_final):
+            logging.warning("[Chat] 幻觉检测触发：DS 说建了任务但没调工具，追一轮")
+            messages.append({
+                "role": "user",
+                "content": "你刚才说帮我建好了，但实际上你没有调用 create_tasks 工具，任务没有写进数据库。请现在调用 create_tasks 把刚才说的任务真正建好。",
+            })
+            for _ in range(MAX_TOOL_ROUNDS):
+                resp = client.chat.completions.create(
+                    model=model_name,
+                    temperature=API_CONFIG["temperature"],
+                    max_tokens=API_CONFIG["max_tokens"],
+                    top_p=API_CONFIG["top_p"],
+                    messages=messages,
+                    tools=PLAN_MODE_TOOLS,
+                )
+                msg = resp.choices[0].message
+                messages.append(msg.model_dump(exclude_none=True))
+                if not msg.tool_calls:
+                    raw_final = msg.content or raw_final
+                    break
+                for tc in msg.tool_calls:
+                    name = tc.function.name
+                    try:
+                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                    except json.JSONDecodeError:
+                        args = {}
+                    result = execute_tool(user_id, name, args)
+                    logging.warning(f"[Chat] 补调 tool={name} args={args} → {result[:120]}")
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                    if name == "create_tasks":
+                        try:
+                            parsed = json.loads(result)
+                            for t in parsed.get("created_tasks") or []:
+                                created_tasks.append(t)
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
+
         reply, confirmed = _parse_chat_reply(raw_final, mode=mode)
         if not reply:
             reply = FRESH_FALLBACK

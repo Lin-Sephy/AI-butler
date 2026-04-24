@@ -104,8 +104,7 @@ export function ChatProvider({ children }) {
         if (created.length > 0) {
           setLastCreatedTasks(created)
         }
-        // confirmed=true 时触发弹窗（但弹窗只有在有 created_tasks 时才有意义）
-        if (resp.confirmed && created.length > 0) {
+        if (created.length > 0) {
           setPlanConfirmed(true)
         }
       } catch (e) {

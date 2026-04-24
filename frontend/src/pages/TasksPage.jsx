@@ -44,6 +44,7 @@ export default function TasksPage() {
         fetchTasks()
       } else {
         setFocusTask(null)
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: action === 'complete' ? 'completed' : action === 'abandon' ? 'abandoned' : t.status } : t))
         await fetchTasks()
       }
     } catch (e) {
