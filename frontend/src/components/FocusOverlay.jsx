@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 
 export default function FocusOverlay({ task, onComplete, onAbandon }) {
-  const [elapsed, setElapsed] = useState(0) // 秒
+  const [elapsed, setElapsed] = useState(0)
   const [paused, setPaused] = useState(false)
+  const [tooShortHint, setTooShortHint] = useState(false)
   const intervalRef = useRef(null)
   // 以 Date.now() 为基准，避免 tab 不可见时 setInterval 被浏览器节流导致秒数丢失
   const startTimeRef = useRef(Date.now())
@@ -90,10 +91,20 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
       <div style={{
         fontSize: 15,
         color: 'var(--color-subtle)',
-        marginBottom: 48,
+        marginBottom: tooShortHint ? 12 : 48,
       }}>
         {isCountdown ? 'focus' : 'open'} · {task.keyword}
       </div>
+
+      {tooShortHint && (
+        <div style={{
+          fontSize: 13, color: 'var(--color-primary)',
+          marginBottom: 24,
+          transition: 'opacity 0.3s ease',
+        }}>
+          不到一分钟哦，再坚持一下？
+        </div>
+      )}
 
       {/* 控制按钮 */}
       <div style={{ display: 'flex', gap: 16 }}>
@@ -110,7 +121,14 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
           {paused ? '继续' : '暂停'}
         </button>
         <button
-          onClick={() => onComplete(task.id)}
+          onClick={() => {
+            if (elapsed < 60) {
+              setTooShortHint(true)
+              setTimeout(() => setTooShortHint(false), 2500)
+              return
+            }
+            onComplete(task.id)
+          }}
           style={{
             padding: '12px 28px', borderRadius: 'var(--radius)',
             border: '1px solid var(--color-primary)',

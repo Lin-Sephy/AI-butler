@@ -77,13 +77,24 @@ def resume_task(user_id: str, task_id: int) -> dict:
 
 
 def complete_task(user_id: str, task_id: int) -> dict:
-    """完成任务：executing/paused → completed。"""
-    now = now_cn().isoformat()
+    """完成任务：executing/paused → completed。用实际用时覆盖 default_minutes。"""
+    now = now_cn()
+    task = _get_task_by_id(user_id, task_id)
+    updates = {"status": "completed", "completed_at": now.isoformat()}
+    started = task.get("started_at")
+    if started:
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(started)
+            actual = max(1, round((now - dt).total_seconds() / 60))
+            updates["default_minutes"] = actual
+        except (ValueError, TypeError):
+            pass
     _patch("task", {
         "id": f"eq.{task_id}",
         "user_id": f"eq.{user_id}",
         "status": "in.(executing,paused)",
-    }, {"status": "completed", "completed_at": now}, return_row=False)
+    }, updates, return_row=False)
     return _get_task_by_id(user_id, task_id)
 
 

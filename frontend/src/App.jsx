@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from './contexts/AuthContext.jsx'
+import { ToastProvider } from './contexts/ToastContext.jsx'
 import TasksPage from './pages/TasksPage.jsx'
 import ChatPage from './pages/ChatPage.jsx'
 import StatsPage from './pages/StatsPage.jsx'
@@ -56,15 +57,17 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <main style={{ flex: 1, padding: '40px 24px', maxWidth: 720, margin: '0 auto', width: '100%' }}>
-        {tab === 'tasks' && <TasksPage />}
-        {tab === 'chat'  && <ChatPage />}
-        {tab === 'stats' && <StatsPage />}
-        {tab === 'me'    && <MePage />}
-      </main>
-      <TabBar current={tab} onChange={setTab} />
-    </div>
+    <ToastProvider>
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <main style={{ flex: 1, padding: '40px 24px', maxWidth: 720, margin: '0 auto', width: '100%' }}>
+          {tab === 'tasks' && <TasksPage />}
+          {tab === 'chat'  && <ChatPage />}
+          {tab === 'stats' && <StatsPage />}
+          {tab === 'me'    && <MePage />}
+        </main>
+        <TabBar current={tab} onChange={setTab} />
+      </div>
+    </ToastProvider>
   )
 }
 

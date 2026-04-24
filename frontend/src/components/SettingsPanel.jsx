@@ -12,11 +12,14 @@
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { apiFetch } from '../lib/api.js'
 import { useConfirm } from '../contexts/ConfirmContext.jsx'
+import { useToast } from '../contexts/ToastContext.jsx'
 import PersonaPresets from './PersonaPresets.jsx'
 import LlmConfig from './LlmConfig.jsx'
+import ErrorBanner from './ErrorBanner.jsx'
 
 export default function SettingsPanel({ onClose }) {
   const confirm = useConfirm()
+  const showToast = useToast()
   // ─── 可编辑字段（受 dirty 跟踪） ───
   const [name, setName] = useState('')
   const [persona, setPersona] = useState('')
@@ -161,7 +164,7 @@ export default function SettingsPanel({ onClose }) {
       await apiFetch('/api/memo/ai', { method: 'DELETE' })
       setAiMemo('')
     } catch (e) {
-      alert(`清空失败：${e.message}`)
+      showToast(`清空失败：${e.message}`)
     } finally {
       setAiMemoLoading(false)
     }
@@ -407,16 +410,6 @@ function CharCount({ current, max }) {
   )
 }
 
-function ErrorBanner({ children }) {
-  return (
-    <div style={{
-      padding: '10px 14px', marginBottom: 12,
-      borderRadius: 'var(--radius)',
-      background: '#fee', border: '1px solid #fbb',
-      fontSize: 13, color: '#933',
-    }}>{children}</div>
-  )
-}
 
 
 // ════════════ 公共样式 ════════════

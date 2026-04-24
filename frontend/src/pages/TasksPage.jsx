@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { apiFetch } from '../lib/api.js'
+import { useToast } from '../contexts/ToastContext.jsx'
 import TaskCard from '../components/TaskCard.jsx'
 import NewTaskModal from '../components/NewTaskModal.jsx'
 import FocusOverlay from '../components/FocusOverlay.jsx'
 
 export default function TasksPage() {
+  const showToast = useToast()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(false)
   const [firstLoad, setFirstLoad] = useState(true)
@@ -51,7 +53,7 @@ export default function TasksPage() {
         await fetchTasks()
       }
     } catch (e) {
-      alert(e.message)
+      showToast(e.message)
     }
   }
 
@@ -60,7 +62,7 @@ export default function TasksPage() {
       await apiFetch(`/api/task/${taskId}`, { method: 'DELETE' })
       await fetchTasks()
     } catch (e) {
-      alert(e.message)
+      showToast(e.message)
     }
   }
 
@@ -69,7 +71,7 @@ export default function TasksPage() {
       await apiFetch(`/api/task/${taskId}/restore`, { method: 'POST' })
       await fetchTasks()
     } catch (e) {
-      alert(e.message)
+      showToast(e.message)
     }
   }
 

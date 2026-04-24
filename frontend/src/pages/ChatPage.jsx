@@ -20,6 +20,7 @@ import StoatHalf from '../components/StoatHalf.jsx'
 import ChatBubble from '../components/ChatBubble.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import PlanConfirmModal from '../components/PlanConfirmModal.jsx'
+import ErrorBanner from '../components/ErrorBanner.jsx'
 
 const STOAT_WIDTH = 220
 const BUBBLE_MAX_LEN = 100      // 小白气泡：超过截断 + "更多"
@@ -493,18 +494,6 @@ function BgPineLayer() {
       backgroundSize: '360px 240px',
       backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='240' viewBox='0 0 360 240'><g fill='%234896c4' opacity='0.45'><path d='M40 200 L30 160 L50 160 Z M35 170 L25 130 L45 130 Z M37 140 L28 100 L46 100 Z'/><path d='M140 210 L128 170 L152 170 Z M134 180 L124 140 L144 140 Z'/><path d='M260 200 L248 160 L272 160 Z M254 170 L244 130 L264 130 Z M256 140 L247 100 L265 100 Z M258 110 L250 80 L266 80 Z'/><path d='M340 205 L330 170 L350 170 Z M335 180 L325 145 L345 145 Z'/></g></svg>")`,
     }} />
-  )
-}
-
-function ErrorBanner({ children }) {
-  return (
-    <div style={{
-      padding: '10px 14px', marginBottom: 12,
-      borderRadius: 'var(--radius)',
-      background: '#fee', border: '1px solid #fbb',
-      fontSize: 13, color: '#933',
-      position: 'relative', zIndex: 1,
-    }}>{children}</div>
   )
 }
 
