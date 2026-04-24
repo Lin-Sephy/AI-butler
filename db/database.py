@@ -12,6 +12,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 import config
+from core.crypto import encrypt_api_key, decrypt_api_key
 
 # Supabase 请求超时和重试配置
 # 本地网络到 Singapore 区偶发 SSL handshake 超时（_ssl.c:1063），
@@ -205,7 +206,7 @@ def get_full_profile(user_id: str) -> dict:
         "llm_provider": row.get("llm_provider") or "",
         "llm_base_url": row.get("llm_base_url") or "",
         "llm_model": row.get("llm_model") or "",
-        "llm_api_key": row.get("llm_api_key") or "",
+        "llm_api_key": decrypt_api_key(row.get("llm_api_key") or ""),
     }
 
 
@@ -225,7 +226,7 @@ def get_llm_config(user_id: str) -> dict:
         "provider": row.get("llm_provider") or "",
         "base_url": row.get("llm_base_url") or "",
         "model": row.get("llm_model") or "",
-        "api_key": row.get("llm_api_key") or "",
+        "api_key": decrypt_api_key(row.get("llm_api_key") or ""),
     }
 
 
@@ -238,7 +239,8 @@ def save_llm_config(user_id: str, provider: str, base_url: str, model: str,
         "llm_model": model,
     }
     if api_key is not None:
-        data["llm_api_key"] = api_key
+        # 空串照样存空串（清空操作），非空才走加密
+        data["llm_api_key"] = encrypt_api_key(api_key) if api_key else ""
 
     # upsert：没 row 就插，有就 patch
     existing = _get("user_profile", {"user_id": f"eq.{user_id}", "select": "user_id"})

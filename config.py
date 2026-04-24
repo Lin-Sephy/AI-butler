@@ -22,3 +22,8 @@ SUPABASE_JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_
 
 # Supabase JWT 的 audience 固定是 "authenticated"（登录用户）或 "anon"（未登录）
 SUPABASE_JWT_AUDIENCE = "authenticated"
+
+# BYOK 加密主钥匙（Fernet，44 字符 base64）
+# 用户存的 OpenAI key 在 user_profile.llm_api_key 里加密存储，靠这把 key 解锁。
+# 本地 .env 和 Render env 必须同值。生成方法见 .env.example。
+BYOK_ENCRYPTION_KEY = os.getenv("BYOK_ENCRYPTION_KEY", "")
