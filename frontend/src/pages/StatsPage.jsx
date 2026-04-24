@@ -17,23 +17,24 @@ import './StatsPage.css'
 export default function StatsPage() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [firstLoad, setFirstLoad] = useState(true)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    if (firstLoad) setLoading(true)
     setError(null)
     apiFetch('/api/stats/dashboard')
       .then(d => {
-        if (!cancelled) { setData(d); setLoading(false) }
+        if (!cancelled) { setData(d); setLoading(false); setFirstLoad(false) }
       })
       .catch(e => {
-        if (!cancelled) { setError(e); setLoading(false) }
+        if (!cancelled) { setError(e); setLoading(false); setFirstLoad(false) }
       })
     return () => { cancelled = true }
   }, [])
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div style={{
         padding: '60px 20px',

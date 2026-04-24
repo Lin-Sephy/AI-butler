@@ -21,6 +21,8 @@ from core.task_manager import (
     delete_task as _delete_task_impl,
     create_task as _create_task_impl,
     create_scheduled_task as _create_scheduled_task_impl,
+    create_recurring_task as _create_recurring_impl,
+    spawn_daily_tasks,
 )
 
 
@@ -173,6 +175,13 @@ PLAN_MODE_TOOLS = [
                                         "用户指定了时间（如'明天早上 9 点'、'周五 14:00'）时填。"
                                         "格式用 'YYYY-MM-DD HH:MM'（推荐，用 user message 里的当前时间推算）。"
                                         "只填 'HH:MM' 会按今天算。没指定时间就别填。"
+                                    ),
+                                },
+                                "recurring": {
+                                    "type": "boolean",
+                                    "description": (
+                                        "用户说'每天都要做'、'每日'、'循环'时设为 true。"
+                                        "每日循环任务每天自动出现在任务栏。默认 false。"
                                     ),
                                 },
                             },
@@ -378,14 +387,33 @@ def _tool_create_tasks(user_id: str, args: dict) -> dict:
             })
             continue
 
+        is_recurring = bool(item.get("recurring"))
+
         try:
-            if scheduled_iso:
+            if is_recurring:
+                rec = _create_recurring_impl(user_id, keyword, default_minutes=minutes)
+                spawn_daily_tasks(user_id)
+                created.append({
+                    "task_id": rec.get("id"),
+                    "keyword": keyword,
+                    "minutes": minutes,
+                    "recurring": True,
+                    "status": "recurring",
+                })
+            elif scheduled_iso:
                 row = _create_scheduled_task_impl(
                     user_id,
                     keyword=keyword, scheduled_at=scheduled_iso, combo="",
                     energy_level=energy_level,
                     suggested_minutes=minutes,
                 )
+                created.append({
+                    "task_id": row.get("id"),
+                    "keyword": row.get("keyword"),
+                    "minutes": row.get("default_minutes"),
+                    "scheduled_at": row.get("scheduled_at"),
+                    "status": row.get("status"),
+                })
             else:
                 row = _create_task_impl(
                     user_id,
@@ -394,13 +422,13 @@ def _tool_create_tasks(user_id: str, args: dict) -> dict:
                     suggested_minutes=minutes,
                     auto_start=False,
                 )
-            created.append({
-                "task_id": row.get("id"),
-                "keyword": row.get("keyword"),
-                "minutes": row.get("default_minutes"),
-                "scheduled_at": row.get("scheduled_at"),
-                "status": row.get("status"),
-            })
+                created.append({
+                    "task_id": row.get("id"),
+                    "keyword": row.get("keyword"),
+                    "minutes": row.get("default_minutes"),
+                    "scheduled_at": row.get("scheduled_at"),
+                    "status": row.get("status"),
+                })
         except Exception as e:
             logging.error(f"[PlanTool] create_tasks({keyword!r}) 失败: {type(e).__name__}: {e}")
             failed.append({"keyword": keyword, "reason": type(e).__name__})

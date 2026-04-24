@@ -59,12 +59,22 @@ const STATUS_CONFIG = {
 
 function formatScheduledTime(iso) {
   if (!iso) return ''
-  // '2026-04-22T19:16:00' / '2026-04-22T19:16:00+08:00' 都支持，只取 HH:MM
   const m = iso.match(/T(\d{2}):(\d{2})/)
-  return m ? `${m[1]}:${m[2]}` : ''
+  if (!m) return ''
+  const hhmm = `${m[1]}:${m[2]}`
+  const dateStr = iso.slice(0, 10)
+  const now = new Date()
+  const pad = n => String(n).padStart(2, '0')
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  if (dateStr === today) return hhmm
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const tmrStr = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`
+  if (dateStr === tmrStr) return `明天 ${hhmm}`
+  return `${dateStr.slice(5)} ${hhmm}`
 }
 
-export default function TaskCard({ task, onStart, onPause, onResume, onComplete, onAbandon, onDelete, onRestore }) {
+export default function TaskCard({ task, hideTime, onStart, onPause, onResume, onComplete, onAbandon, onDelete, onRestore }) {
   const [busy, setBusy] = useState(false)
   const status = task.status || 'idle'
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.idle
@@ -114,18 +124,20 @@ export default function TaskCard({ task, onStart, onPause, onResume, onComplete,
           display: 'flex', gap: 10, alignItems: 'center',
           fontFamily: "'Inter', system-ui, sans-serif",
         }}>
-          {status === 'scheduled' && task.scheduled_at && (
+          {!hideTime && status === 'scheduled' && task.scheduled_at && (
             <span>{formatScheduledTime(task.scheduled_at)}</span>
           )}
           {task.default_minutes && <span>{task.default_minutes} min</span>}
-          <span style={{
-            padding: '2px 10px',
-            borderRadius: 99,
-            fontSize: 11,
-            ...cfg.chipStyle,
-          }}>
-            {cfg.chipText}
-          </span>
+          {cfg.chipText && status !== 'idle' && (
+            <span style={{
+              padding: '2px 10px',
+              borderRadius: 99,
+              fontSize: 11,
+              ...cfg.chipStyle,
+            }}>
+              {cfg.chipText}
+            </span>
+          )}
         </div>
       </div>
 

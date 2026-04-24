@@ -6,7 +6,8 @@ import FocusOverlay from '../components/FocusOverlay.jsx'
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [firstLoad, setFirstLoad] = useState(true)
   const [error, setError] = useState(null)
   const [showNewTask, setShowNewTask] = useState(false)
   const [focusTask, setFocusTask] = useState(null)
@@ -14,6 +15,7 @@ export default function TasksPage() {
   const [abandonedOpen, setAbandonedOpen] = useState(false)
 
   const fetchTasks = useCallback(async () => {
+    if (firstLoad) setLoading(true)
     try {
       const data = await apiFetch('/api/tasks/today')
       setTasks(data.tasks || [])
@@ -22,8 +24,9 @@ export default function TasksPage() {
       setError(e.message)
     } finally {
       setLoading(false)
+      setFirstLoad(false)
     }
-  }, [])
+  }, [firstLoad])
 
   useEffect(() => { fetchTasks() }, [fetchTasks])
 
@@ -71,19 +74,42 @@ export default function TasksPage() {
   }
 
   async function handleNewTask(data) {
-    await apiFetch('/api/task/record', { method: 'POST', body: data })
+    const { task_keyword, suggested_minutes, recurring } = data
+    if (recurring) {
+      await apiFetch('/api/recurring', { method: 'POST', body: {
+        keyword: task_keyword,
+        default_minutes: suggested_minutes,
+      }})
+    } else {
+      await apiFetch('/api/task/record', { method: 'POST', body: data })
+    }
     await fetchTasks()
   }
 
   // 分组
-  const executing = tasks.filter(t => t.status === 'executing')
-  const paused = tasks.filter(t => t.status === 'paused')
-  const scheduled = [...tasks.filter(t => t.status === 'scheduled')]
-    .sort((a, b) => (a.scheduled_at || '').localeCompare(b.scheduled_at || ''))
-  const idle = tasks.filter(t => t.status === 'idle')
+  const pad = n => String(n).padStart(2, '0')
+  const now = new Date()
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+
+  const unscheduled = tasks.filter(t =>
+    !t.scheduled_at && ['idle', 'paused', 'executing'].includes(t.status)
+  )
+  const allScheduled = tasks
+    .filter(t => t.scheduled_at && ['idle', 'scheduled', 'paused', 'executing'].includes(t.status))
+    .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at))
+  const todayScheduled = allScheduled.filter(t => t.scheduled_at.slice(0, 10) === todayStr)
+  const futureScheduled = allScheduled.filter(t => t.scheduled_at.slice(0, 10) > todayStr)
+
+  const futureByDate = {}
+  futureScheduled.forEach(t => {
+    const d = t.scheduled_at.slice(0, 10)
+    if (!futureByDate[d]) futureByDate[d] = []
+    futureByDate[d].push(t)
+  })
+
   const completed = tasks.filter(t => t.status === 'completed')
   const abandoned = tasks.filter(t => t.status === 'abandoned')
-  const activeTasks = [...executing, ...paused, ...scheduled, ...idle]
+  const hasActive = unscheduled.length > 0 || allScheduled.length > 0
 
   if (loading) {
     return <CenterText>加载中…</CenterText>
@@ -100,22 +126,7 @@ export default function TasksPage() {
         />
       )}
 
-      {/* 顶部信息栏 */}
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-        marginBottom: 24,
-      }}>
-        <h1 style={{ fontSize: 28, fontWeight: 400 }}>任务</h1>
-        <span style={{
-          fontSize: 12, color: 'var(--color-subtle)',
-          fontFamily: "'Inter', system-ui, sans-serif",
-        }}>
-          {executing.length > 0 && `执行中 ${executing.length}`}
-          {scheduled.length > 0 && ` · 预定 ${scheduled.length}`}
-          {idle.length > 0 && ` · 待完成 ${idle.length}`}
-          {completed.length > 0 && ` · 已完成 ${completed.length}`}
-        </span>
-      </div>
+      <h1 style={{ fontSize: 28, fontWeight: 400, marginBottom: 24 }}>任务</h1>
 
       {error && (
         <div style={{
@@ -128,8 +139,7 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* 活跃任务列表 */}
-      {activeTasks.length === 0 && completed.length === 0 && abandoned.length === 0 ? (
+      {!hasActive && completed.length === 0 && abandoned.length === 0 ? (
         <div style={{
           padding: '56px 32px',
           textAlign: 'center',
@@ -137,15 +147,14 @@ export default function TasksPage() {
           borderRadius: 'var(--radius)',
           background: 'var(--color-surface)',
         }}>
-          <p style={{
-            fontSize: 17, color: 'var(--color-subtle)',
-          }}>
+          <p style={{ fontSize: 17, color: 'var(--color-subtle)' }}>
             今天还没给自己安排点什么呢
           </p>
         </div>
       ) : (
         <>
-          {activeTasks.map(t => (
+          {/* 未定时任务 */}
+          {unscheduled.map(t => (
             <TaskCard
               key={t.id}
               task={t}
@@ -156,6 +165,33 @@ export default function TasksPage() {
               onAbandon={id => handleAction('abandon', id)}
               onDelete={handleDelete}
             />
+          ))}
+
+          {/* 今天的预定任务 — 时间轴 */}
+          {todayScheduled.length > 0 && (
+            <TimelineSection tasks={todayScheduled} cardHandlers={{
+              onStart: id => handleAction('start', id),
+              onPause: id => handleAction('pause', id),
+              onResume: id => handleAction('resume', id),
+              onComplete: id => handleAction('complete', id),
+              onAbandon: id => handleAction('abandon', id),
+              onDelete: handleDelete,
+            }} />
+          )}
+
+          {/* 未来日期的预定任务 */}
+          {Object.keys(futureByDate).sort().map(dateKey => (
+            <div key={dateKey}>
+              <DateDivider date={dateKey} today={todayStr} />
+              <TimelineSection tasks={futureByDate[dateKey]} cardHandlers={{
+                onStart: id => handleAction('start', id),
+                onPause: id => handleAction('pause', id),
+                onResume: id => handleAction('resume', id),
+                onComplete: id => handleAction('complete', id),
+                onAbandon: id => handleAction('abandon', id),
+                onDelete: handleDelete,
+              }} />
+            </div>
           ))}
 
           {/* 已完成折叠 */}
@@ -272,6 +308,66 @@ function CenterText({ children }) {
       fontSize: 14,
     }}>
       {children}
+    </div>
+  )
+}
+
+function TimelineSection({ tasks, cardHandlers }) {
+  return (
+    <div style={{ position: 'relative', paddingLeft: 24, marginTop: 8 }}>
+      {/* 竖线 center = 5px from left edge */}
+      <div style={{
+        position: 'absolute', left: 4, top: 20, bottom: 12,
+        width: 2, background: 'var(--color-primary)', opacity: 0.25,
+        borderRadius: 1,
+      }} />
+      {tasks.map((t, i) => {
+        const m = t.scheduled_at?.match(/T(\d{2}):(\d{2})/)
+        const hhmm = m ? `${m[1]}:${m[2]}` : ''
+        return (
+          <div key={t.id} style={{ position: 'relative' }}>
+            {/* 圆点 center = paddingLeft(24) 外的 0px + left(-24) + width(10)/2 = -19px → 用 left:0 绝对定位到容器 */}
+            <div style={{
+              position: 'absolute', left: -24,
+              top: hhmm ? 40 : 22,
+              width: 10, height: 10, borderRadius: '50%',
+              marginLeft: 0,
+              background: t.status === 'executing' ? 'var(--color-primary)' : 'transparent',
+              border: '2px solid var(--color-primary)',
+              zIndex: 1,
+            }} />
+            {hhmm && (
+              <div style={{
+                fontSize: 12, color: 'var(--color-subtle)',
+                fontFamily: "'Inter', system-ui, sans-serif",
+                marginBottom: 4, marginTop: i > 0 ? 4 : 0,
+              }}>
+                {hhmm}
+              </div>
+            )}
+            <TaskCard task={t} hideTime {...cardHandlers} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function DateDivider({ date, today }) {
+  const pad = n => String(n).padStart(2, '0')
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const tmrStr = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`
+  let label
+  if (date === tmrStr) label = '明天'
+  else label = date.slice(5)
+  return (
+    <div style={{
+      fontSize: 13, color: 'var(--color-subtle)',
+      margin: '20px 0 4px',
+      fontFamily: "'Inter', system-ui, sans-serif",
+    }}>
+      {label}
     </div>
   )
 }

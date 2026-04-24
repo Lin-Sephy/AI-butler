@@ -10,6 +10,7 @@ export default function NewTaskModal({ onSubmit, onClose }) {
   const [customMinutes, setCustomMinutes] = useState('')
   const [useCustom, setUseCustom] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [recurring, setRecurring] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -20,6 +21,7 @@ export default function NewTaskModal({ onSubmit, onClose }) {
       await onSubmit({
         task_keyword: keyword.trim(),
         suggested_minutes: finalMinutes,
+        recurring,
       })
       onClose()
     } finally {
@@ -122,7 +124,35 @@ export default function NewTaskModal({ onSubmit, onClose }) {
           </div>
         </div>
 
-        <div style={{ marginBottom: 24 }} />
+        {/* 每日循环 */}
+        <label style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontSize: 13, cursor: 'pointer', marginBottom: 24,
+        }}
+          onClick={() => setRecurring(!recurring)}
+        >
+          <div style={{
+            width: 34, height: 18,
+            borderRadius: 999,
+            border: `1px solid ${recurring ? 'var(--color-primary)' : 'var(--color-line)'}`,
+            background: recurring ? 'var(--color-primary)' : 'var(--color-accent-soft)',
+            position: 'relative',
+            transition: 'background var(--transition) ease-out, border-color var(--transition) ease-out',
+            flexShrink: 0,
+          }}>
+            <span style={{
+              position: 'absolute',
+              top: 1, left: recurring ? 17 : 1,
+              width: 14, height: 14,
+              borderRadius: '50%',
+              background: '#fff',
+              transition: 'left var(--transition) ease-out',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+            }} />
+          </div>
+          每日循环
+          {recurring && <span style={{ fontSize: 12, color: 'var(--color-subtle)' }}>每天自动出现</span>}
+        </label>
 
         {/* Submit / Cancel */}
         <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
