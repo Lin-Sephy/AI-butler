@@ -150,6 +150,7 @@ export default function FocusRhythm({ hours24, days30, todayDate }) {
   const peakHourText = peakHour && peakHour.minutes > 0
     ? `${pad2(peakHour.hour)}:00-${pad2((peakHour.hour + 1) % 24)}:00`
     : '尚无'
+  const hasHourData = h24.some(h => h.minutes > 0)
 
   const hoursData = h24.map(h => ({
     value: h.minutes,
@@ -160,6 +161,7 @@ export default function FocusRhythm({ hours24, days30, todayDate }) {
 
   // 30d
   const d30 = days30 || []
+  const hasDayData = d30.some(d => d.minutes > 0)
   const todayMinutes = d30.find(d => d.date === todayDate)?.minutes || 0
 
   const daysData = d30.map(d => {
@@ -189,15 +191,24 @@ export default function FocusRhythm({ hours24, days30, todayDate }) {
 
       {/* 一天里什么时候 */}
       <SubHead title="每日专注" meta={<span>高峰在 <Hl>{peakHourText}</Hl></span>} />
-      <Bars
-        data={hoursData}
-        showLabelFn={(d) => d.value > 0}
-        tooltipFn={(d) => {
-          const t = pad2(d.hour) + ':00'
-          return d.value === 0 ? (t + ' · 无') : (t + ' · ' + d.value + ' min')
-        }}
-        initialScrollPercent={0.25}
-      />
+      {hasHourData ? (
+        <Bars
+          data={hoursData}
+          showLabelFn={(d) => d.value > 0}
+          tooltipFn={(d) => {
+            const t = pad2(d.hour) + ':00'
+            return d.value === 0 ? (t + ' · 无') : (t + ' · ' + d.value + ' min')
+          }}
+          initialScrollPercent={0.25}
+        />
+      ) : (
+        <div style={{
+          textAlign: 'center',
+          padding: '40px 20px',
+          color: 'var(--color-muted)',
+          fontSize: 13,
+        }}>还没有专注记录</div>
+      )}
 
       <div style={{
         height: 1,
@@ -207,16 +218,25 @@ export default function FocusRhythm({ hours24, days30, todayDate }) {
 
       {/* 这个月每一天 */}
       <SubHead title="每月专注" meta={<span>今日 <Hl>{todayMinutes} min</Hl></span>} />
-      <Bars
-        data={daysData}
-        showLabelFn={() => true}
-        tooltipFn={(d) => {
-          if (d.future) return d.monthDay + ' · 还没到'
-          return d.value === 0 ? (d.monthDay + ' · 休息') : (d.monthDay + ' · ' + d.value + ' min')
-        }}
-        initialScrollPercent={1.0}
-        wideLabel={true}
-      />
+      {hasDayData ? (
+        <Bars
+          data={daysData}
+          showLabelFn={() => true}
+          tooltipFn={(d) => {
+            if (d.future) return d.monthDay + ' · 还没到'
+            return d.value === 0 ? (d.monthDay + ' · 休息') : (d.monthDay + ' · ' + d.value + ' min')
+          }}
+          initialScrollPercent={1.0}
+          wideLabel={true}
+        />
+      ) : (
+        <div style={{
+          textAlign: 'center',
+          padding: '40px 20px',
+          color: 'var(--color-muted)',
+          fontSize: 13,
+        }}>还没有专注记录</div>
+      )}
     </section>
   )
 }

@@ -106,7 +106,7 @@ export default function ChatPage() {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column',
-      minHeight: 'calc(100vh - 60px - 80px)',
+      minHeight: 'calc(100% + 80px)',
       margin: '-40px -24px',
     }}>
 
@@ -248,6 +248,9 @@ export default function ChatPage() {
             background: 'var(--color-base)',
             font: 'inherit', color: 'var(--color-text)',
             outline: 'none',
+            opacity: sending ? 0.55 : 1,
+            cursor: sending ? 'not-allowed' : 'text',
+            transition: 'opacity var(--transition)',
           }}
         />
         <button
@@ -281,7 +284,7 @@ function HistoryView({ messages, onBack, onNewSession, error }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column',
-      minHeight: 'calc(100vh - 60px - 80px)',
+      minHeight: 'calc(100% + 80px)',
       margin: '-40px -24px',
     }}>
       <header style={{

@@ -28,9 +28,9 @@ const R = 38
 // 环 stroke-width 18，所以环的"体"位于 R-9=29 到 R+9=47。
 // dot 放在 R=43——略探入环内缘一点，视觉上"钉"在环上而不是浮在环外
 const R_DOT = 43
-const R_TURN = 63        // 转折点半径（引线向外转折）
-const LABEL_X_LEFT = 34
-const LABEL_X_RIGHT = 206
+const R_TURN = 56        // 转折点半径（引线向外转折）
+const LABEL_X_LEFT = 50
+const LABEL_X_RIGHT = 190
 
 function formatMin(m) {
   if (!m || m < 60) return (m || 0) + 'min'
@@ -85,7 +85,7 @@ function layout(items) {
   })
 
   // 按左右分组后做简单防重叠：相邻 label 最小间距 14
-  const MIN_GAP = 14
+  const MIN_GAP = 18
   const adjust = (group) => {
     group.sort((a, b) => a.yTurn - b.yTurn)
     for (let i = 1; i < group.length; i++) {
@@ -167,7 +167,7 @@ export default function TaskDonut({ distribution }) {
           alignItems: 'center',
           padding: '10px 0 6px',
         }}>
-          <svg viewBox="0 0 240 160" style={{ width: '100%', maxWidth: 520, height: 'auto', display: 'block' }}>
+          <svg viewBox="0 0 240 160" overflow="visible" style={{ width: '100%', maxWidth: 520, height: 'auto', display: 'block' }}>
             {/* 环 */}
             <g transform={`rotate(-90 ${CX} ${CY})`}>
               <circle cx={CX} cy={CY} r={R} fill="none" stroke="var(--color-line-soft)" strokeWidth="18" />
@@ -210,22 +210,22 @@ export default function TaskDonut({ distribution }) {
                 <circle cx={s.x0} cy={s._origYTurn} r="1" fill="var(--color-text)" />
                 <text
                   x={s.xLabel}
-                  y={s.yTurn - 1.5}
+                  y={s.yTurn - 2}
                   textAnchor={s.isRight ? 'start' : 'end'}
                   style={{
                     fontFamily: "'Noto Serif SC', serif",
-                    fontSize: 6,
+                    fontSize: 8,
                     fill: 'var(--color-text)',
                     fontWeight: 400,
                   }}
                 >{s.keyword}</text>
                 <text
                   x={s.xLabel}
-                  y={s.yTurn + 6}
+                  y={s.yTurn + 7}
                   textAnchor={s.isRight ? 'start' : 'end'}
                   style={{
                     fontFamily: "'IBM Plex Serif', serif",
-                    fontSize: 5.4,
+                    fontSize: 7,
                     fill: 'var(--color-subtle)',
                     fontVariantNumeric: 'tabular-nums',
                     letterSpacing: '0.02em',
