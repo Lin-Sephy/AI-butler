@@ -64,6 +64,19 @@ init_db()
 # 注意：spawn_daily_tasks 需要 user_id，不在启动时跑；放进 /api/tasks/today 按需触发
 
 
+# ---------- 健康检查（Supabase 保活） ----------
+
+@app.get("/api/health")
+def health_check():
+    """轻量健康检查：查一次 Supabase 防 7 天暂停。"""
+    from db.database import _get
+    try:
+        _get("user_profile", {"select": "user_id", "limit": "1"})
+        return {"status": "ok", "db": "connected"}
+    except Exception as e:
+        return {"status": "ok", "db": f"error: {e}"}
+
+
 # ---------- 请求/响应模型 ----------
 
 class ChatRequest(BaseModel):
