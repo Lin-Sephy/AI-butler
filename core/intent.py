@@ -59,7 +59,13 @@ def _get_client(user_llm: dict | None = None) -> tuple[OpenAI, str]:
     ), API_CONFIG["model"]
 
 
-_CLAIM_KEYWORDS = re.compile(r"建好了|已.*创建|已.*安排|帮你.*建|已.*加入|写进去了|录入了|已.*写入|写入.*数据库|记下来了|加到.*任务")
+_CLAIM_KEYWORDS = re.compile(
+    r"建好[了啦]|搞定[了啦]|安排上[了啦]|设好[了啦]|弄好[了啦]|加好[了啦]"
+    r"|已.*创建|已.*安排|已.*加入|已.*写入|已.*设定|已.*添加|已.*记录"
+    r"|帮你.*[建加设弄]|给你.*[建加设弄]"
+    r"|写进.*[了啦]|录入[了啦]|记下[了来]|加到.*任务"
+    r"|写入.*数据库|任务栏.*[了啦]"
+)
 
 def _claims_created(text: str) -> bool:
     return bool(_CLAIM_KEYWORDS.search(text))

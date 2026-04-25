@@ -328,7 +328,12 @@ def _spawn_daily_tasks_impl(user_id: str) -> None:
         if not existing:
             stime = rec.get("scheduled_time")
             if stime:
-                scheduled_at = f"{today_date}T{stime}:00"
+                now_time = now_cn().strftime("%H:%M")
+                if stime > now_time:
+                    scheduled_at = f"{today_date}T{stime}:00"
+                else:
+                    tomorrow = (now_cn() + timedelta(days=1)).strftime("%Y-%m-%d")
+                    scheduled_at = f"{tomorrow}T{stime}:00"
                 status = "scheduled"
             else:
                 scheduled_at = None
