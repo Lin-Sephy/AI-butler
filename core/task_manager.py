@@ -282,8 +282,27 @@ def delete_recurring_task(user_id: str, rec_id: int) -> None:
     }, {"active": 0}, return_row=False)
 
 
+import threading
+_spawn_locks: dict[str, threading.Lock] = {}
+_spawn_locks_guard = threading.Lock()
+
 def spawn_daily_tasks(user_id: str) -> None:
     """每天首次调用时，为该用户所有启用的循环任务生成今日 idle 任务。"""
+    with _spawn_locks_guard:
+        if user_id not in _spawn_locks:
+            _spawn_locks[user_id] = threading.Lock()
+        lock = _spawn_locks[user_id]
+
+    if not lock.acquire(blocking=False):
+        return
+
+    try:
+        _spawn_daily_tasks_impl(user_id)
+    finally:
+        lock.release()
+
+
+def _spawn_daily_tasks_impl(user_id: str) -> None:
     today_start = now_cn().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     now = now_cn().isoformat()
 
@@ -302,7 +321,7 @@ def spawn_daily_tasks(user_id: str) -> None:
             "keyword": f"eq.{rec['keyword']}",
             "created_at": f"gte.{today_start}",
             "combo": "eq.recurring",
-            "status": "in.(idle,executing,paused,completed,abandoned)",
+            "status": "in.(idle,executing,paused,completed,abandoned,scheduled)",
             "select": "id",
             "limit": "1",
         })
