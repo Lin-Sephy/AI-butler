@@ -102,25 +102,38 @@ export default function NewTaskModal({ onSubmit, onClose }) {
               {m} min
             </button>
           ))}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            padding: '6px 14px',
+            borderRadius: 'var(--radius)',
+            border: `1px solid ${useCustom ? 'var(--color-primary)' : 'var(--color-line)'}`,
+            background: useCustom ? 'var(--color-primary-soft)' : 'transparent',
+            gap: 2,
+          }}>
             <input
-              type="number"
-              min="1"
-              max="480"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               placeholder="自填"
               value={customMinutes}
               onFocus={() => setUseCustom(true)}
-              onChange={e => { setCustomMinutes(e.target.value); setUseCustom(true) }}
+              onChange={e => {
+                const v = e.target.value.replace(/\D/g, '')
+                setCustomMinutes(v)
+                setUseCustom(true)
+              }}
               style={{
-                width: 64, padding: '6px 8px',
-                borderRadius: 'var(--radius)',
-                border: `1px solid ${useCustom ? 'var(--color-primary)' : 'var(--color-line)'}`,
-                background: useCustom ? 'var(--color-primary-soft)' : 'transparent',
+                width: 40, padding: 0,
+                border: 'none', background: 'transparent',
                 fontSize: 13, fontFamily: "'Inter', system-ui, sans-serif",
-                color: 'var(--color-text)',
+                color: useCustom ? 'var(--color-primary)' : 'var(--color-text)',
+                outline: 'none',
               }}
             />
-            <span style={{ fontSize: 12, color: 'var(--color-subtle)' }}>min</span>
+            <span style={{
+              fontSize: 13, fontFamily: "'Inter', system-ui, sans-serif",
+              color: useCustom ? 'var(--color-primary)' : 'var(--color-subtle)',
+            }}>min</span>
           </div>
         </div>
 

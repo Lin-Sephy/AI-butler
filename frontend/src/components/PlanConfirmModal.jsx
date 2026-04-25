@@ -230,6 +230,11 @@ function TaskRow({ task, onChangeKeyword, onChangeMinutes, onDelete }) {
             boxSizing: 'content-box',
           }}
         />
+        {task.scheduled_at && (
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, fontSize: 12, color: 'var(--color-subtle)' }}>
+            <span>{task.scheduled_at.replace('T', ' ').slice(0, 16)}</span>
+          </div>
+        )}
       </div>
 
       {/* 第二行：时长 chip + 自定义 */}

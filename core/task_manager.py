@@ -230,14 +230,38 @@ def get_active_task(user_id: str) -> dict | None:
 # ---- 循环任务 ----
 
 def create_recurring_task(user_id: str, keyword: str, task_type: str = "work",
-                          default_minutes: int | None = None) -> dict:
-    """创建一个每日循环任务模板。"""
-    return _post("recurring_task", {
+                          default_minutes: int | None = None,
+                          scheduled_time: str | None = None) -> dict:
+    """创建一个每日循环任务模板。同名模板已存在则更新，不重复建。"""
+    existing = _get("recurring_task", {
+        "user_id": f"eq.{user_id}",
+        "keyword": f"eq.{keyword}",
+        "active": "eq.1",
+        "select": "*",
+        "limit": "1",
+    })
+    if existing:
+        update = {}
+        if default_minutes is not None:
+            update["default_minutes"] = default_minutes
+        if scheduled_time is not None:
+            update["scheduled_time"] = scheduled_time
+        if update:
+            _patch("recurring_task", {
+                "id": f"eq.{existing[0]['id']}",
+                "user_id": f"eq.{user_id}",
+            }, update, return_row=False)
+        return {**existing[0], **update}
+
+    data = {
         "user_id": user_id,
         "keyword": keyword,
         "task_type": task_type,
         "default_minutes": default_minutes,
-    })
+    }
+    if scheduled_time:
+        data["scheduled_time"] = scheduled_time
+    return _post("recurring_task", data)
 
 
 def get_recurring_tasks(user_id: str) -> list[dict]:
@@ -269,6 +293,8 @@ def spawn_daily_tasks(user_id: str) -> None:
         "select": "*",
     })
 
+    today_date = now_cn().strftime("%Y-%m-%d")
+
     for rec in recurring:
         # 检查今天是否已有该循环任务
         existing = _get("task", {
@@ -281,12 +307,21 @@ def spawn_daily_tasks(user_id: str) -> None:
             "limit": "1",
         })
         if not existing:
+            stime = rec.get("scheduled_time")
+            if stime:
+                scheduled_at = f"{today_date}T{stime}:00"
+                status = "scheduled"
+            else:
+                scheduled_at = None
+                status = "idle"
+
             _post("task", {
                 "user_id": user_id,
                 "keyword": rec["keyword"],
                 "combo": "recurring",
                 "energy_at_start": None,
-                "status": "idle",
+                "status": status,
+                "scheduled_at": scheduled_at,
                 "default_minutes": rec["default_minutes"],
                 "task_type": rec["task_type"],
                 "created_at": now,

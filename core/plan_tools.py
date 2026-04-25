@@ -179,6 +179,7 @@ PLAN_MODE_TOOLS = [
                                     "description": (
                                         "用户说'每天都要做'、'每日'、'循环'时设为 true。"
                                         "每日循环任务每天自动出现在任务栏。默认 false。"
+                                        "可同时填 scheduled_at 指定每天几点（如 recurring=true + scheduled_at='09:00'）。"
                                     ),
                                 },
                             },
@@ -392,15 +393,39 @@ def _tool_create_tasks(user_id: str, args: dict) -> dict:
 
         is_recurring = bool(item.get("recurring"))
 
+        # 同时间冲突检测：有 scheduled_at 时查今天同时间是否已有任务
+        if scheduled_iso:
+            hhmm = scheduled_iso[11:16]
+            today_tasks = get_today_tasks(user_id)
+            conflicts = [
+                t for t in today_tasks
+                if t.get("scheduled_at") and t["scheduled_at"][11:16] == hhmm
+                and t.get("status") not in ("completed", "abandoned")
+            ]
+            if conflicts:
+                conflict_info = [{"task_id": t["id"], "keyword": t["keyword"], "time": hhmm} for t in conflicts]
+                failed.append({
+                    "keyword": keyword,
+                    "reason": f"{hhmm} 已有任务：{', '.join(t['keyword'] for t in conflicts)}。请问铲屎官是要调整时间，还是在同一时间再加一个？",
+                    "conflicts": conflict_info,
+                })
+                continue
+
         try:
             if is_recurring:
-                rec = _create_recurring_impl(user_id, keyword, default_minutes=minutes)
+                stime = None
+                if scheduled_iso:
+                    m = scheduled_iso[11:16]  # "HH:MM"
+                    if m:
+                        stime = m
+                rec = _create_recurring_impl(user_id, keyword, default_minutes=minutes, scheduled_time=stime)
                 spawn_daily_tasks(user_id)
                 created.append({
                     "task_id": rec.get("id"),
                     "keyword": keyword,
                     "minutes": minutes,
                     "recurring": True,
+                    "scheduled_time": stime,
                     "status": "recurring",
                 })
             elif scheduled_iso:
