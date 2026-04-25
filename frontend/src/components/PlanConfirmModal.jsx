@@ -243,12 +243,15 @@ function TaskRow({ task, onChangeKeyword, onChangeMinutes, onDelete }) {
             {m}m
           </MiniChip>
         ))}
+        {isCustom && (
+          <MiniChip selected>{minutes}m</MiniChip>
+        )}
         <input
           type="number"
           min="1"
           max="480"
           placeholder="自填"
-          value={isCustom ? minutes : ''}
+          value=""
           onChange={e => {
             const v = e.target.value
             if (v === '') return
@@ -259,9 +262,9 @@ function TaskRow({ task, onChangeKeyword, onChangeMinutes, onDelete }) {
             width: 52,
             padding: '4px 8px',
             borderRadius: 999,
-            border: `1px solid ${isCustom ? 'var(--color-primary)' : 'var(--color-line)'}`,
-            background: isCustom ? 'var(--color-primary-soft)' : 'transparent',
-            color: isCustom ? 'var(--color-primary)' : 'var(--color-text)',
+            border: '1px solid var(--color-line)',
+            background: 'transparent',
+            color: 'var(--color-text)',
             fontSize: 12, fontFamily: "'Inter', system-ui, sans-serif",
             outline: 'none',
           }}

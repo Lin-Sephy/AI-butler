@@ -66,6 +66,15 @@ export default function TasksPage() {
     }
   }
 
+  async function handleStopRecurring(taskId) {
+    try {
+      await apiFetch(`/api/task/${taskId}/recurring`, { method: 'DELETE' })
+      await fetchTasks()
+    } catch (e) {
+      showToast(e.message)
+    }
+  }
+
   async function handleRestore(taskId) {
     try {
       await apiFetch(`/api/task/${taskId}/restore`, { method: 'POST' })
@@ -166,6 +175,7 @@ export default function TasksPage() {
               onComplete={id => handleAction('complete', id)}
               onAbandon={id => handleAction('abandon', id)}
               onDelete={handleDelete}
+              onStopRecurring={handleStopRecurring}
             />
           ))}
 
@@ -178,6 +188,7 @@ export default function TasksPage() {
               onComplete: id => handleAction('complete', id),
               onAbandon: id => handleAction('abandon', id),
               onDelete: handleDelete,
+              onStopRecurring: handleStopRecurring,
             }} />
           )}
 
@@ -192,6 +203,7 @@ export default function TasksPage() {
                 onComplete: id => handleAction('complete', id),
                 onAbandon: id => handleAction('abandon', id),
                 onDelete: handleDelete,
+                onStopRecurring: handleStopRecurring,
               }} />
             </div>
           ))}

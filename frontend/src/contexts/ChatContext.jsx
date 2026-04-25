@@ -52,6 +52,7 @@ export function ChatProvider({ children }) {
   const [mode, setModeRaw] = useState(_readSavedMode)
   const [planConfirmed, setPlanConfirmed] = useState(false)
   const [lastCreatedTasks, setLastCreatedTasks] = useState([])   // v5.0 p2: DS 本轮 create_tasks 写入的任务，PlanConfirmModal 事后编辑用
+  const [pendingDeletes, setPendingDeletes] = useState([])       // v5: DS 本轮 delete_task(s) 待确认删除的任务
 
   // setMode 包一层：同步落 localStorage，避免刷新丢
   const setMode = useCallback(next => {
@@ -103,9 +104,12 @@ export function ChatProvider({ children }) {
         const created = resp.created_tasks || []
         if (created.length > 0) {
           setLastCreatedTasks(created)
-        }
-        if (created.length > 0) {
           setPlanConfirmed(true)
+        }
+        // 本轮 DS 通过 delete_task(s) 提交的待删任务
+        const deletes = resp.pending_deletes || []
+        if (deletes.length > 0) {
+          setPendingDeletes(deletes)
         }
       } catch (e) {
         setError(e.message)
@@ -118,6 +122,10 @@ export function ChatProvider({ children }) {
   const clearPlanConfirmed = useCallback(() => {
     setPlanConfirmed(false)
     setLastCreatedTasks([])
+  }, [])
+
+  const clearPendingDeletes = useCallback(() => {
+    setPendingDeletes([])
   }, [])
 
   // ── resetSession：顶部 ⊕ 新建对话 ──
@@ -142,9 +150,11 @@ export function ChatProvider({ children }) {
     mode,
     planConfirmed,
     lastCreatedTasks,
+    pendingDeletes,
     send,
     setMode,
     clearPlanConfirmed,
+    clearPendingDeletes,
     resetSession,
   }
 

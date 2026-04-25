@@ -441,8 +441,9 @@ def get_tasks_recent(user_id: str, days: int = 7) -> list[dict]:
     completed_at 超过 N 天的不返回，让 DS 的 query_tasks / query_schedule 视野只看到近期真实活动。
     """
     now = now_cn()
-    since = (now - timedelta(days=days)).isoformat()
-    abandoned_cutoff = (now - timedelta(days=ABANDONED_RETENTION_DAYS)).isoformat()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    since = (day_start - timedelta(days=days - 1)).isoformat()
+    abandoned_cutoff = (day_start - timedelta(days=ABANDONED_RETENTION_DAYS)).isoformat()
     tasks = _get("task", {
         "user_id": f"eq.{user_id}",
         "created_at": f"gte.{since}",

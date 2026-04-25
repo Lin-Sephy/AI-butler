@@ -19,6 +19,8 @@ from db.database import (
 )
 from core.task_manager import (
     delete_task as _delete_task_impl,
+    _get_task_by_id,
+    get_today_tasks,
     create_task as _create_task_impl,
     create_scheduled_task as _create_scheduled_task_impl,
     create_recurring_task as _create_recurring_impl,
@@ -69,18 +71,13 @@ PLAN_MODE_TOOLS = [
         "function": {
             "name": "query_tasks",
             "description": (
-                "查最近几天的任务记录明细（哪天做了什么、做了多久、完成没有）。"
-                "默认只看今天（和前端任务栏一致）；用户明确问昨天、最近几天或这周时才传 days。"
-                "abandoned 状态的任务只保留最近 2 天，更久远的查不到。"
+                "查铲屎官当前任务栏的所有任务（和任务栏显示完全一致）。"
+                "包含今天的 idle / executing / paused / scheduled / completed 任务，"
+                "以及最近 2 天的 abandoned 任务（可恢复）。看不到更早的历史。"
             ),
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "days": {
-                        "type": "integer",
-                        "description": "查询最近多少天，默认 1（只看今天）",
-                    },
-                },
+                "properties": {},
             },
         },
     },
@@ -202,14 +199,7 @@ PLAN_MODE_TOOLS = [
 
 
 def _tool_query_tasks(user_id: str, args: dict) -> dict:
-    days = args.get("days", 1)
-    try:
-        days = int(days)
-    except (TypeError, ValueError):
-        days = 1
-    days = max(1, min(30, days))
-
-    tasks = get_tasks_recent(user_id, days=days)
+    tasks = get_today_tasks(user_id)
     records = [
         {
             "task_id": t.get("id"),
@@ -223,7 +213,7 @@ def _tool_query_tasks(user_id: str, args: dict) -> dict:
         }
         for t in tasks
     ]
-    return {"days": days, "count": len(records), "records": records}
+    return {"count": len(records), "records": records}
 
 
 def _tool_query_stats(user_id: str, args: dict) -> dict:
@@ -300,29 +290,36 @@ def _tool_query_schedule(user_id: str, args: dict) -> dict:
 
 
 def _tool_delete_task(user_id: str, args: dict) -> dict:
-    """删除指定任务（限本人）。DS 只有在用户明确要取消时才应调。"""
+    """不真删，返回待删任务详情，由前端弹窗让用户确认后再删。"""
     task_id = args.get("task_id")
     try:
         task_id = int(task_id)
     except (TypeError, ValueError):
         return {"error": "task_id 必须是整数"}
 
-    try:
-        _delete_task_impl(user_id, task_id)
-    except Exception as e:
-        logging.error(f"[PlanTool] delete_task({task_id}) 失败: {type(e).__name__}: {e}")
-        return {"error": f"删除失败: {type(e).__name__}"}
+    task = _get_task_by_id(user_id, task_id)
+    if not task:
+        return {"error": f"task_id={task_id} 不存在"}
 
-    return {"ok": True, "deleted_task_id": task_id}
+    return {
+        "ok": True,
+        "pending_deletes": [{
+            "task_id": task.get("id"),
+            "keyword": task.get("keyword"),
+            "status": task.get("status"),
+            "minutes": task.get("default_minutes"),
+        }],
+        "message": "已提交删除确认，等铲屎官在弹窗里确认后才会真正删除。",
+    }
 
 
 def _tool_delete_tasks(user_id: str, args: dict) -> dict:
-    """批量删除任务。一次处理多条，省 function calling 轮数。"""
+    """不真删，返回待删任务详情列表，由前端弹窗让用户确认后再删。"""
     raw = args.get("task_ids")
     if not isinstance(raw, list) or not raw:
         return {"error": "task_ids 必须是非空整数列表"}
 
-    deleted: list[int] = []
+    pending: list[dict] = []
     failed: list[dict] = []
     for item in raw:
         try:
@@ -330,17 +327,23 @@ def _tool_delete_tasks(user_id: str, args: dict) -> dict:
         except (TypeError, ValueError):
             failed.append({"task_id": item, "reason": "不是整数"})
             continue
-        try:
-            _delete_task_impl(user_id, tid)
-            deleted.append(tid)
-        except Exception as e:
-            logging.error(f"[PlanTool] delete_tasks({tid}) 失败: {type(e).__name__}: {e}")
-            failed.append({"task_id": tid, "reason": type(e).__name__})
+
+        task = _get_task_by_id(user_id, tid)
+        if not task:
+            failed.append({"task_id": tid, "reason": "不存在"})
+            continue
+
+        pending.append({
+            "task_id": task.get("id"),
+            "keyword": task.get("keyword"),
+            "status": task.get("status"),
+            "minutes": task.get("default_minutes"),
+        })
 
     result: dict = {
-        "ok": not failed,
-        "deleted_count": len(deleted),
-        "deleted_task_ids": deleted,
+        "ok": True,
+        "pending_deletes": pending,
+        "message": f"已提交 {len(pending)} 条删除确认，等铲屎官在弹窗里确认后才会真正删除。",
     }
     if failed:
         result["failed"] = failed

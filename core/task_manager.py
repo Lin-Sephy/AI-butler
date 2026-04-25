@@ -276,7 +276,7 @@ def spawn_daily_tasks(user_id: str) -> None:
             "keyword": f"eq.{rec['keyword']}",
             "created_at": f"gte.{today_start}",
             "combo": "eq.recurring",
-            "status": "in.(idle,executing,paused,completed)",
+            "status": "in.(idle,executing,paused,completed,abandoned)",
             "select": "id",
             "limit": "1",
         })

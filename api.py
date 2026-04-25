@@ -89,6 +89,7 @@ class ChatResponse(BaseModel):
     reply: str
     confirmed: bool = False  # v5 计划模式：DS 是否判定用户已定稿
     created_tasks: list[dict] = []  # v5 计划模式：本轮 create_tasks 工具写入的任务，前端弹窗用
+    pending_deletes: list[dict] = []  # v5 计划模式：本轮 delete_task(s) 待确认删除，前端弹窗用
 
 
 class ProjectCreateRequest(BaseModel):
@@ -254,6 +255,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
         reply=reply,
         confirmed=confirmed,
         created_tasks=chat_result.get("created_tasks") or [],
+        pending_deletes=chat_result.get("pending_deletes") or [],
     )
 
 
@@ -416,6 +418,24 @@ def remove_recurring(rec_id: int, user_id: str = Depends(get_current_user_id)):
     """删除循环任务。"""
     delete_recurring_task(user_id, rec_id)
     return {"message": "已删除"}
+
+
+@app.delete("/api/task/{task_id}/recurring")
+def stop_recurring_by_task(task_id: int, user_id: str = Depends(get_current_user_id)):
+    """通过今日任务副本停掉对应的循环模板，并删除该副本。"""
+    from core.task_manager import _get_task_by_id
+    task = _get_task_by_id(user_id, task_id)
+    if not task or task.get("combo") != "recurring":
+        raise HTTPException(404, "不是循环任务")
+    keyword = task.get("keyword")
+    recs = get_recurring_tasks(user_id)
+    stopped = False
+    for rec in recs:
+        if rec.get("keyword") == keyword:
+            delete_recurring_task(user_id, rec["id"])
+            stopped = True
+    delete_task(user_id, task_id)
+    return {"message": f"已停止每日「{keyword}」", "stopped": stopped}
 
 
 # ---------- 记忆库接口 ----------

@@ -100,7 +100,7 @@ function layout(items) {
 }
 
 export default function TaskDonut({ distribution }) {
-  const [range, setRange] = useState('week')
+  const [range, setRange] = useState('day')
   const bucket = distribution?.[range] || { total_minutes: 0, items: [] }
   const items = compact(bucket.items)
   const segments = layout(items)

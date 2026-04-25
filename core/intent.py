@@ -160,6 +160,7 @@ def call_chat(user_input: str,
         # Function calling 循环：闲聊模式一次就出；计划模式可能调工具再返
         raw_final = ""
         created_tasks: list[dict] = []   # 本轮 create_tasks 工具写入的任务（返给前端弹窗）
+        pending_deletes: list[dict] = []  # 本轮 delete_task(s) 待确认删除的任务
         for _ in range(MAX_TOOL_ROUNDS):
             resp = client.chat.completions.create(
                 model=model_name,
@@ -198,6 +199,14 @@ def call_chat(user_input: str,
                         parsed = json.loads(result)
                         for t in parsed.get("created_tasks") or []:
                             created_tasks.append(t)
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+                # 收集 delete_task(s) 的待确认删除列表
+                if name in ("delete_task", "delete_tasks"):
+                    try:
+                        parsed = json.loads(result)
+                        for t in parsed.get("pending_deletes") or []:
+                            pending_deletes.append(t)
                     except (json.JSONDecodeError, AttributeError):
                         pass
         else:
@@ -251,6 +260,7 @@ def call_chat(user_input: str,
             "reply": reply,
             "confirmed": confirmed,
             "created_tasks": created_tasks,
+            "pending_deletes": pending_deletes,
         }
 
     except Exception as e:

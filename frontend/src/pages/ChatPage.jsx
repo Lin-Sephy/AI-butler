@@ -20,6 +20,7 @@ import StoatHalf from '../components/StoatHalf.jsx'
 import ChatBubble from '../components/ChatBubble.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import PlanConfirmModal from '../components/PlanConfirmModal.jsx'
+import DeleteConfirmModal from '../components/DeleteConfirmModal.jsx'
 import ErrorBanner from '../components/ErrorBanner.jsx'
 
 const STOAT_WIDTH = 220
@@ -40,6 +41,7 @@ export default function ChatPage() {
   const {
     messages, loading, error, send, resetSession, mode, setMode,
     sessionId, planConfirmed, lastCreatedTasks, clearPlanConfirmed,
+    pendingDeletes, clearPendingDeletes,
   } = useChat()
   const confirm = useConfirm()
 
@@ -141,6 +143,13 @@ export default function ChatPage() {
         <PlanConfirmModal
           initialTasks={lastCreatedTasks}
           onClose={clearPlanConfirmed}
+        />
+      )}
+
+      {pendingDeletes.length > 0 && (
+        <DeleteConfirmModal
+          pendingTasks={pendingDeletes}
+          onClose={clearPendingDeletes}
         />
       )}
 

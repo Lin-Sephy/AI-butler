@@ -74,7 +74,7 @@ function formatScheduledTime(iso) {
   return `${dateStr.slice(5)} ${hhmm}`
 }
 
-export default function TaskCard({ task, hideTime, onStart, onPause, onResume, onComplete, onAbandon, onDelete, onRestore }) {
+export default function TaskCard({ task, hideTime, onStart, onPause, onResume, onComplete, onAbandon, onDelete, onRestore, onStopRecurring }) {
   const [busy, setBusy] = useState(false)
   const status = task.status || 'idle'
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.idle
@@ -128,7 +128,17 @@ export default function TaskCard({ task, hideTime, onStart, onPause, onResume, o
             <span>{formatScheduledTime(task.scheduled_at)}</span>
           )}
           {task.default_minutes && <span>{task.default_minutes} min</span>}
-          {cfg.chipText && status !== 'idle' && (
+          {task.combo === 'recurring' && (
+            <span style={{
+              padding: '2px 10px',
+              borderRadius: 99,
+              fontSize: 11,
+              ...STATUS_CONFIG.scheduled.chipStyle,
+            }}>
+              每日
+            </span>
+          )}
+          {cfg.chipText && status !== 'idle' && task.combo !== 'recurring' && (
             <span style={{
               padding: '2px 10px',
               borderRadius: 99,
@@ -146,7 +156,7 @@ export default function TaskCard({ task, hideTime, onStart, onPause, onResume, o
         {(status === 'idle' || status === 'scheduled') && (
           <>
             <ActionBtn label="开始" onClick={() => act(onStart)} disabled={busy} />
-            <ActionBtn label="删除" onClick={() => act(onDelete)} disabled={busy} subtle />
+            <ActionBtn label="删除" onClick={() => act(task.combo === 'recurring' && onStopRecurring ? onStopRecurring : onDelete)} disabled={busy} subtle />
           </>
         )}
         {status === 'executing' && (
