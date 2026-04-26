@@ -157,6 +157,8 @@ def get_today_tasks(user_id: str) -> list[dict]:
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     abandoned_cutoff = (now - timedelta(days=ABANDONED_RETENTION_DAYS)).isoformat()
 
+    today_end = now.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
+
     # 今天创建的活跃任务（含 completed、排除 abandoned）
     active = _get("task", {
         "user_id": f"eq.{user_id}",
@@ -165,6 +167,22 @@ def get_today_tasks(user_id: str) -> list[dict]:
         "select": "*",
         "order": "created_at.desc",
     })
+
+    # scheduled_at 在今天的任务（不管哪天创建的，比如昨天建的"明天9点"）
+    scheduled_today = _get("task", [
+        ("user_id", f"eq.{user_id}"),
+        ("scheduled_at", f"gte.{today_start}"),
+        ("scheduled_at", f"lte.{today_end}"),
+        ("status", "neq.abandoned"),
+        ("select", "*"),
+    ])
+
+    # 合并去重（同一个任务可能两个查询都命中）
+    seen = {t["id"] for t in active}
+    for t in scheduled_today:
+        if t["id"] not in seen:
+            active.append(t)
+            seen.add(t["id"])
 
     # 最近 2 天被放弃的任务（手动放弃 + 自动结转都在这）
     abandoned = _get("task", {
