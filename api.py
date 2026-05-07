@@ -92,6 +92,11 @@ class ChatResponse(BaseModel):
     pending_deletes: list[dict] = []  # v5 计划模式：本轮 delete_task(s) 待确认删除，前端弹窗用
 
 
+class SessionNoteRequest(BaseModel):
+    content: str
+    mode: str = "plan"
+
+
 class ProjectCreateRequest(BaseModel):
     name: str
     keywords: list[str] = []
@@ -489,7 +494,19 @@ def new_session(user_id: str = Depends(get_current_user_id)):
 def get_messages(session_id: str, user_id: str = Depends(get_current_user_id)):
     """获取会话历史消息。"""
     messages = load_session_messages(user_id, session_id)
-    return {"messages": messages}
+    return {"messages": [m for m in messages if m.get("role") != "system_note"]}
+
+
+@app.post("/api/session/{session_id}/note")
+def add_session_note(session_id: str, req: SessionNoteRequest,
+                     user_id: str = Depends(get_current_user_id)):
+    """写入只给模型看的会话事件，不在前端历史里展示。"""
+    content = req.content.strip()
+    if not content:
+        raise HTTPException(400, "记录内容不能为空")
+    mode = req.mode if req.mode in ("chat", "plan") else "plan"
+    save_chat_message(user_id, session_id, "system_note", content, mode)
+    return {"message": "已记录"}
 
 
 # ---------- 跟宠设置接口 ----------

@@ -157,7 +157,10 @@ def call_chat(user_input: str,
         if chat_history:
             recent = chat_history[-20:]
             for msg in recent:
-                messages.append({"role": msg["role"], "content": msg["content"]})
+                if msg.get("role") == "system_note":
+                    messages.append({"role": "user", "content": f"[系统记录] {msg['content']}"})
+                else:
+                    messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": user_message})
 
         tools = PLAN_MODE_TOOLS if mode == "plan" else None

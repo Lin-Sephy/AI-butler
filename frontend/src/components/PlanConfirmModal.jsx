@@ -16,10 +16,13 @@
 
 import { useState } from 'react'
 import { apiFetch } from '../lib/api.js'
+import { recordSessionNote } from '../lib/chatApi.js'
+import { useConfirm } from '../contexts/ConfirmContext.jsx'
 
 const MINUTE_OPTIONS = [25, 45, 60, 90]
 
-export default function PlanConfirmModal({ initialTasks, onClose }) {
+export default function PlanConfirmModal({ initialTasks, sessionId, onClose }) {
+  const confirm = useConfirm()
   const [tasks, setTasks] = useState(initialTasks || [])
   const [error, setError] = useState(null)
 
@@ -56,6 +59,13 @@ export default function PlanConfirmModal({ initialTasks, onClose }) {
   }
 
   async function handleDelete(task) {
+    const ok = await confirm({
+      message: `确定删掉「${task.keyword}」吗？`,
+      confirmText: '删除',
+      danger: true,
+    })
+    if (!ok) return
+
     const prev = tasks
     setTasks(prev.filter(t => t.task_id !== task.task_id))
     try {
@@ -63,6 +73,19 @@ export default function PlanConfirmModal({ initialTasks, onClose }) {
     } catch (e) {
       setTasks(prev)
       setError(`删除失败：${e.message}`)
+      return
+    }
+
+    if (sessionId) {
+      try {
+        await recordSessionNote({
+          sessionId,
+          content: `用户在任务确认弹窗里删除了「${task.keyword}」。`,
+          mode: 'plan',
+        })
+      } catch (e) {
+        setError(`任务已删除，但小白没有记住这次删除：${e.message}`)
+      }
     }
   }
 

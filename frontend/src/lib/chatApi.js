@@ -49,3 +49,10 @@ export async function sendMessage({ message, sessionId, mode = 'chat' }) {
     },
   })
 }
+
+export async function recordSessionNote({ sessionId, content, mode = 'plan' }) {
+  return apiFetch(`/api/session/${sessionId}/note`, {
+    method: 'POST',
+    body: { content, mode },
+  })
+}

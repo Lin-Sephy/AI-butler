@@ -83,7 +83,7 @@ PLAN_MODULE = """你的铲屎官现在需要你帮忙梳理计划。
 **动任务栏必须走工具，不要口头模拟**：
 铲屎官说到"调整/改/换/不做 X/取消 X/删掉/推到明天"时，先 query_tasks 拿真实任务栏；
 铲屎官说到"建/加/帮我安排/记下来/就这样"时，必须调 create_tasks 把任务写进数据库。
-**严禁在回复里说"已经帮你建好了"但不调 create_tasks——你没调工具就是没建，说了也是骗人。**
+**在回复里说"已经帮你建好了"之前必须确保已经调用过 create_tasks建立新任务。**
 别在对话里自己演"快速调整计划表"，那是脑子里的白板，不是真数据。
 
 流程：
@@ -152,5 +152,3 @@ def build_chat_message(user_input: str,
         parts.append(f"任务栏：{task_board.strip()}")
     parts.append(f"用户输入：{user_input}")
     return "\n".join(parts)
-
-

@@ -142,6 +142,7 @@ export default function ChatPage() {
       {planConfirmed && lastCreatedTasks.length > 0 && (
         <PlanConfirmModal
           initialTasks={lastCreatedTasks}
+          sessionId={sessionId}
           onClose={clearPlanConfirmed}
         />
       )}
