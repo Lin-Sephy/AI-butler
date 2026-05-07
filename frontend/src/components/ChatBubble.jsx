@@ -4,9 +4,11 @@
  */
 
 import stoatSrc from '../assets/stoat-front.svg'
+import { renderAssistantText } from '../lib/text.jsx'
 
 export default function ChatBubble({ message }) {
   const isUser = message.role === 'user'
+  const content = isUser ? message.content : renderAssistantText(message.content)
 
   return (
     <div style={{
@@ -32,7 +34,7 @@ export default function ChatBubble({ message }) {
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}>
-          {message.content}
+          {content}
         </div>
       </div>
     </div>

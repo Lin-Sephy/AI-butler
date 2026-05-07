@@ -22,6 +22,7 @@ import SettingsPanel from '../components/SettingsPanel.jsx'
 import PlanConfirmModal from '../components/PlanConfirmModal.jsx'
 import DeleteConfirmModal from '../components/DeleteConfirmModal.jsx'
 import ErrorBanner from '../components/ErrorBanner.jsx'
+import { cleanAssistantText, renderAssistantText } from '../lib/text.jsx'
 
 const STOAT_WIDTH = 220
 const BUBBLE_MAX_LEN = 100      // 小白气泡：超过截断 + "更多"
@@ -425,8 +426,10 @@ function UserBubble({ text, opacity }) {
 function SpeechBubble({ who, text }) {
   const [expanded, setExpanded] = useState(false)
   const isAi = who === 'ai'
-  const tooLong = text.length > BUBBLE_MAX_LEN
-  const display = (tooLong && !expanded) ? text.slice(0, BUBBLE_MAX_LEN) + '...' : text
+  const cleanText = isAi ? cleanAssistantText(text) : text
+  const tooLong = cleanText.length > BUBBLE_MAX_LEN
+  const display = (tooLong && !expanded) ? cleanText.slice(0, BUBBLE_MAX_LEN) + '...' : cleanText
+  const displayNode = isAi ? renderAssistantText(display) : display
 
   return (
     <div style={{
@@ -446,7 +449,7 @@ function SpeechBubble({ who, text }) {
         wordBreak: 'break-word',
         boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
       }}>
-        {display}
+        {displayNode}
         {tooLong && (
           <button
             onClick={() => setExpanded(!expanded)}
