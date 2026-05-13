@@ -14,6 +14,7 @@ import { apiFetch } from '../lib/api.js'
 import { useConfirm } from '../contexts/ConfirmContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
 import { useChat } from '../contexts/ChatContext.jsx'
+import { recordSessionNote } from '../lib/chatApi.js'
 import PersonaPresets from './PersonaPresets.jsx'
 import LlmConfig from './LlmConfig.jsx'
 import ErrorBanner from './ErrorBanner.jsx'
@@ -21,7 +22,7 @@ import ErrorBanner from './ErrorBanner.jsx'
 export default function SettingsPanel({ onClose }) {
   const confirm = useConfirm()
   const showToast = useToast()
-  const { setCompanionName } = useChat()
+  const { sessionId, setCompanionName } = useChat()
   // ─── 可编辑字段（受 dirty 跟踪） ───
   const [name, setName] = useState('')
   const [persona, setPersona] = useState('')
@@ -120,10 +121,20 @@ export default function SettingsPanel({ onClose }) {
         label: '名字/性格',
         promise: apiFetch('/api/profile/companion', { method: 'PUT', body: companionPatch }),
         apply: snap => {
+          const oldName = snap.name || '小白'
           snap.name = name
           snap.persona = persona
           if (Object.prototype.hasOwnProperty.call(companionPatch, 'name')) {
             setCompanionName(name)
+            if (sessionId) {
+              recordSessionNote({
+                sessionId,
+                mode: 'chat',
+                content: `用户把跟宠名字从「${oldName}」改成了「${name}」。以后请用「${name}」自称或回应相关称呼。`,
+              }).catch(e => {
+                showToast(`名字已保存，但没有通知到跟宠：${e.message}`)
+              })
+            }
           }
         },
       })
