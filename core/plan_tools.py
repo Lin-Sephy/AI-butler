@@ -211,6 +211,7 @@ def _tool_query_tasks(user_id: str, args: dict) -> dict:
             "completed_at": t.get("completed_at"),
             "scheduled_at": t.get("scheduled_at"),
             "minutes": t.get("default_minutes"),
+            "combo": t.get("combo"),
         }
         for t in tasks
     ]
@@ -309,6 +310,7 @@ def _tool_delete_task(user_id: str, args: dict) -> dict:
             "keyword": task.get("keyword"),
             "status": task.get("status"),
             "minutes": task.get("default_minutes"),
+            "combo": task.get("combo"),
         }],
         "message": "已提交删除确认，等铲屎官在弹窗里确认后才会真正删除。",
     }
@@ -339,6 +341,7 @@ def _tool_delete_tasks(user_id: str, args: dict) -> dict:
             "keyword": task.get("keyword"),
             "status": task.get("status"),
             "minutes": task.get("default_minutes"),
+            "combo": task.get("combo"),
         })
 
     result: dict = {

@@ -5,7 +5,7 @@
  * 本弹窗展示列表，用户勾选确认后才真正调 DELETE /api/task/{id} 删除。
  *
  * pendingTasks 结构（从 ChatContext.pendingDeletes 来）：
- *   [{ task_id, keyword, status, minutes }, ...]
+ *   [{ task_id, keyword, status, minutes, combo }, ...]
  */
 
 import { useState } from 'react'
@@ -48,8 +48,12 @@ export default function DeleteConfirmModal({ pendingTasks, onClose, onDeleted })
     setError(null)
     const failed = []
     for (const tid of selected) {
+      const task = pendingTasks.find(t => t.task_id === tid)
+      const path = task?.combo === 'recurring'
+        ? `/api/task/${tid}/recurring`
+        : `/api/task/${tid}`
       try {
-        await apiFetch(`/api/task/${tid}`, { method: 'DELETE' })
+        await apiFetch(path, { method: 'DELETE' })
       } catch (e) {
         failed.push(tid)
       }
@@ -163,6 +167,7 @@ export default function DeleteConfirmModal({ pendingTasks, onClose, onDeleted })
                 <div style={{ fontSize: 12, color: 'var(--color-subtle)', marginTop: 2 }}>
                   {STATUS_LABEL[task.status] || task.status}
                   {task.minutes ? ` · ${task.minutes}分钟` : ''}
+                  {task.combo === 'recurring' ? ' · 每日' : ''}
                 </div>
               </div>
             </label>
