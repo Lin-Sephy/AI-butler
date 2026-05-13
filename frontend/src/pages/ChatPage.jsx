@@ -13,15 +13,17 @@
  * 模式切换 UI（chat ↔ plan）和计划确认界面（planConfirmed 触发）由前端小克后续补。
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useRef, useEffect, Fragment } from 'react'
 import { useChat } from '../contexts/ChatContext.jsx'
 import { useConfirm } from '../contexts/ConfirmContext.jsx'
 import StoatHalf from '../components/StoatHalf.jsx'
+import ChatBubble from '../components/ChatBubble.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import PlanConfirmModal from '../components/PlanConfirmModal.jsx'
 import DeleteConfirmModal from '../components/DeleteConfirmModal.jsx'
 import ErrorBanner from '../components/ErrorBanner.jsx'
-import { listSessions } from '../lib/chatApi.js'
+import stoatAvatar from '../assets/stoat-front.svg'
+import { listSessions, loadHistory } from '../lib/chatApi.js'
 import { cleanAssistantText, renderAssistantText } from '../lib/text.jsx'
 
 const STOAT_WIDTH = 220
@@ -96,6 +98,8 @@ export default function ChatPage() {
         onSelectSession={async id => {
           await switchSession(id)
           setView('main')
+          setModeHint('已选择当前会话')
+          setTimeout(() => setModeHint(null), 1800)
         }}
         error={error}
       />
@@ -298,6 +302,7 @@ export default function ChatPage() {
 function HistoryView({ currentSessionId, onBack, onNewSession, onSelectSession, error }) {
   const confirm = useConfirm()
   const [sessions, setSessions] = useState([])
+  const [detailSession, setDetailSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [localError, setLocalError] = useState(null)
 
@@ -317,6 +322,16 @@ function HistoryView({ currentSessionId, onBack, onNewSession, onSelectSession, 
     })()
     return () => { alive = false }
   }, [])
+
+  if (detailSession) {
+    return (
+      <ConversationDetailView
+        session={detailSession}
+        onBack={() => setDetailSession(null)}
+        error={error}
+      />
+    )
+  }
 
   return (
     <div style={{
@@ -369,17 +384,23 @@ function HistoryView({ currentSessionId, onBack, onNewSession, onSelectSession, 
               {sessions.map(s => {
                 const isCurrent = s.session_id === currentSessionId
                 return (
-                  <button
+                  <div
                     key={s.session_id}
-                    type="button"
-                    onClick={() => onSelectSession(s.session_id)}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetailSession(s)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDetailSession(s)
+                      }
+                    }}
                     style={{
                       width: '100%',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between',
                       gap: 12,
-                      padding: '14px 16px',
+                      padding: '12px 14px',
                       borderRadius: 8,
                       border: `1px solid ${isCurrent ? 'var(--color-primary)' : 'var(--color-line)'}`,
                       background: isCurrent ? 'var(--color-primary-soft)' : 'var(--color-surface)',
@@ -390,7 +411,16 @@ function HistoryView({ currentSessionId, onBack, onNewSession, onSelectSession, 
                       boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
                     }}
                   >
+                    <SessionAvatar
+                      active={isCurrent}
+                      onClick={e => {
+                        e.stopPropagation()
+                        onSelectSession(s.session_id)
+                      }}
+                    />
                     <span style={{
+                      flex: 1,
+                      minWidth: 0,
                       fontSize: 14,
                       lineHeight: 1.4,
                       overflow: 'hidden',
@@ -399,7 +429,7 @@ function HistoryView({ currentSessionId, onBack, onNewSession, onSelectSession, 
                     }}>
                       {s.title}
                     </span>
-                    {isCurrent && (
+                    {isCurrent ? (
                       <span style={{
                         flexShrink: 0,
                         fontSize: 11,
@@ -407,8 +437,12 @@ function HistoryView({ currentSessionId, onBack, onNewSession, onSelectSession, 
                       }}>
                         当前
                       </span>
+                    ) : (
+                      <span style={{ flexShrink: 0, color: 'var(--color-muted)' }}>
+                        ›
+                      </span>
                     )}
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -416,6 +450,166 @@ function HistoryView({ currentSessionId, onBack, onNewSession, onSelectSession, 
         </div>
       </main>
     </div>
+  )
+}
+
+
+function ConversationDetailView({ session, onBack, error }) {
+  const [messages, setMessages] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [localError, setLocalError] = useState(null)
+  const endRef = useRef(null)
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        setLoading(true)
+        setLocalError(null)
+        const data = await loadHistory(session.session_id)
+        if (alive) setMessages(data.messages || [])
+      } catch (e) {
+        if (alive) setLocalError(e.message)
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false }
+  }, [session.session_id])
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      minHeight: 'calc(100% + 80px)',
+      margin: '-40px -24px',
+    }}>
+      <header style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '12px 20px',
+        borderBottom: '1px solid var(--color-line)',
+        background: 'var(--color-base)',
+        position: 'sticky', top: 0, zIndex: 10,
+      }}>
+        <IconBtn title="返回列表" onClick={onBack}>
+          <span style={{ fontSize: 18, lineHeight: 1 }}>‹‹</span>
+        </IconBtn>
+        <div style={{
+          fontSize: 14,
+          color: 'var(--color-subtle)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          maxWidth: '70%',
+        }}>
+          {session.title}
+        </div>
+        <div style={{ width: 36 }} />
+      </header>
+
+      <main style={{
+        flex: 1, overflowY: 'auto',
+        padding: '20px',
+        background: 'var(--color-base)',
+        position: 'relative',
+      }}>
+        <BgPineLayer />
+        {error && <ErrorBanner>{error}</ErrorBanner>}
+        {localError && <ErrorBanner>{localError}</ErrorBanner>}
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          {loading ? (
+            <p style={{ textAlign: 'center', color: 'var(--color-subtle)', padding: '40px 0' }}>
+              正在打开对话……
+            </p>
+          ) : messages.length === 0 ? (
+            <p style={{ textAlign: 'center', color: 'var(--color-subtle)', padding: '40px 0' }}>
+              这段对话没有消息
+            </p>
+          ) : (
+            messages.map((m, i) => {
+              const prev = i > 0 ? messages[i - 1] : null
+              const curMode = m.mode || 'chat'
+              const prevMode = prev ? (prev.mode || 'chat') : null
+              const showDivider = prev && prevMode !== curMode
+              return (
+                <Fragment key={i}>
+                  {showDivider && <ModeDivider mode={curMode} />}
+                  <ChatBubble message={m} />
+                </Fragment>
+              )
+            })
+          )}
+          <div ref={endRef} />
+        </div>
+      </main>
+    </div>
+  )
+}
+
+
+function SessionAvatar({ active, onClick }) {
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      title={active ? '当前会话' : '选择这段对话'}
+      onClick={onClick}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick(e)
+        }
+      }}
+      style={{
+        position: 'relative',
+        width: 42,
+        height: 42,
+        borderRadius: '50%',
+        flexShrink: 0,
+        cursor: 'pointer',
+        overflow: 'visible',
+      }}
+    >
+      <span
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          borderRadius: '50%',
+          border: `1px solid ${active ? 'var(--color-primary)' : 'var(--color-line)'}`,
+          background: '#fff',
+          overflow: 'hidden',
+          boxShadow: active ? '0 0 0 3px var(--color-primary-soft)' : 'none',
+        }}
+      >
+        <img
+          src={stoatAvatar}
+          alt=""
+          aria-hidden="true"
+          style={{
+            width: '120%',
+            marginLeft: '-10%',
+            marginTop: '-2%',
+            display: 'block',
+            filter: active ? 'none' : 'grayscale(1)',
+            opacity: active ? 1 : 0.42,
+          }}
+        />
+      </span>
+      {active && (
+        <span style={{
+          position: 'absolute',
+          right: -1,
+          bottom: -1,
+          width: 10,
+          height: 10,
+          borderRadius: '50%',
+          background: '#32c76a',
+          border: '2px solid #fff',
+        }} />
+      )}
+    </span>
   )
 }
 
