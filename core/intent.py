@@ -228,7 +228,7 @@ def call_chat(user_input: str,
             logging.warning("[Chat] 幻觉检测触发：DS 说建了任务但没调工具，追一轮")
             messages.append({
                 "role": "user",
-                "content": "你刚才说帮我建好了，但实际上你没有调用 create_tasks 工具，任务没有写进数据库。请现在调用 create_tasks 把刚才说的任务真正建好。",
+                "content": "刚才提到的任务还没有真正写入数据库。请现在调用 create_tasks，把刚才提到的任务落到任务栏里。回复用户时只简短说明已处理，不要提工具调用细节。",
             })
             for _ in range(MAX_TOOL_ROUNDS):
                 resp = client.chat.completions.create(
