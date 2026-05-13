@@ -29,7 +29,9 @@ import { newSession, loadHistory, sendMessage } from '../lib/chatApi.js'
 
 const SESSION_KEY = 'ai-butler-session-id'
 const MODE_KEY = 'ai-butler-chat-mode'
+const COMPANION_NAME_KEY = 'ai-butler-companion-name'
 const DEFAULT_GREETING = '来啦～'
+const DEFAULT_COMPANION_NAME = '小白'
 
 const ChatContext = createContext(null)
 
@@ -43,6 +45,14 @@ function _readSavedMode() {
   }
 }
 
+function _readSavedCompanionName() {
+  try {
+    return localStorage.getItem(COMPANION_NAME_KEY) || DEFAULT_COMPANION_NAME
+  } catch {
+    return DEFAULT_COMPANION_NAME
+  }
+}
+
 export function ChatProvider({ children }) {
   const { user, loading: authLoading } = useAuth()
 
@@ -51,6 +61,7 @@ export function ChatProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [mode, setModeRaw] = useState(_readSavedMode)
+  const [companionName, setCompanionNameRaw] = useState(_readSavedCompanionName)
   const [planConfirmed, setPlanConfirmed] = useState(false)
   const [lastCreatedTasks, setLastCreatedTasks] = useState([])   // v5.0 p2: DS 本轮 create_tasks 写入的任务，PlanConfirmModal 事后编辑用
   const [pendingDeletes, setPendingDeletes] = useState([])       // v5: DS 本轮 delete_task(s) 待确认删除的任务
@@ -59,6 +70,12 @@ export function ChatProvider({ children }) {
   const setMode = useCallback(next => {
     setModeRaw(next)
     try { localStorage.setItem(MODE_KEY, next) } catch {}
+  }, [])
+
+  const setCompanionName = useCallback(next => {
+    const clean = (next || '').trim() || DEFAULT_COMPANION_NAME
+    setCompanionNameRaw(clean)
+    try { localStorage.setItem(COMPANION_NAME_KEY, clean) } catch {}
   }, [])
 
   const bootstrapped = useRef(false)
@@ -168,11 +185,13 @@ export function ChatProvider({ children }) {
     loading,
     error,
     mode,
+    companionName,
     planConfirmed,
     lastCreatedTasks,
     pendingDeletes,
     send,
     setMode,
+    setCompanionName,
     clearPlanConfirmed,
     clearPendingDeletes,
     resetSession,

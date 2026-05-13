@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState, useRef } from 'react'
 import { apiFetch } from '../lib/api.js'
 import { useConfirm } from '../contexts/ConfirmContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
+import { useChat } from '../contexts/ChatContext.jsx'
 import PersonaPresets from './PersonaPresets.jsx'
 import LlmConfig from './LlmConfig.jsx'
 import ErrorBanner from './ErrorBanner.jsx'
@@ -20,6 +21,7 @@ import ErrorBanner from './ErrorBanner.jsx'
 export default function SettingsPanel({ onClose }) {
   const confirm = useConfirm()
   const showToast = useToast()
+  const { setCompanionName } = useChat()
   // ─── 可编辑字段（受 dirty 跟踪） ───
   const [name, setName] = useState('')
   const [persona, setPersona] = useState('')
@@ -56,7 +58,9 @@ export default function SettingsPanel({ onClose }) {
         apiFetch('/api/memo/user'),
         apiFetch('/api/memo/ai'),
       ])
-      setName(companion.name || '')
+      const companionName = companion.name || ''
+      setName(companionName)
+      setCompanionName(companionName)
       setPersona(companion.custom_persona || '')
       setPersonaMax(companion.max_persona_length ?? 1000)
 
@@ -69,7 +73,7 @@ export default function SettingsPanel({ onClose }) {
       setAiMemo(aiMemoData.content || '')
 
       originalRef.current = {
-        name: companion.name || '',
+        name: companionName,
         persona: companion.custom_persona || '',
         routine: routineData.routine || '',
         userMemo: memoData.content || '',
@@ -79,7 +83,7 @@ export default function SettingsPanel({ onClose }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [setCompanionName])
 
   useEffect(() => { loadAll() }, [loadAll])
 
@@ -115,7 +119,13 @@ export default function SettingsPanel({ onClose }) {
       jobs.push({
         label: '名字/性格',
         promise: apiFetch('/api/profile/companion', { method: 'PUT', body: companionPatch }),
-        apply: snap => { snap.name = name; snap.persona = persona },
+        apply: snap => {
+          snap.name = name
+          snap.persona = persona
+          if (Object.prototype.hasOwnProperty.call(companionPatch, 'name')) {
+            setCompanionName(name)
+          }
+        },
       })
     }
     if (routine !== o.routine) {
@@ -155,7 +165,7 @@ export default function SettingsPanel({ onClose }) {
   // ─── 清空 AI 记忆 ───
   async function handleClearAiMemo() {
     if (!await confirm({
-      message: '清空小白对你的印象？这个不可撤销。',
+      message: '清空跟宠对你的印象？这个不可撤销。',
       confirmText: '清空',
       danger: true,
     })) return
@@ -239,13 +249,13 @@ export default function SettingsPanel({ onClose }) {
             </div>
           ) : (
             <>
-              {/* ① 小白命名 */}
-              <Section title="小白命名" hint="给跟宠起个名字">
+              {/* ① 跟宠命名 */}
+              <Section title="跟宠命名" hint="给跟宠起个名字">
                 <input
                   value={name}
                   onChange={e => setName(e.target.value)}
                   maxLength={20}
-                  placeholder="小白"
+                  placeholder="给跟宠起个名字"
                   style={inputStyle}
                 />
               </Section>
@@ -260,7 +270,7 @@ export default function SettingsPanel({ onClose }) {
                   value={persona}
                   onChange={e => setPersona(e.target.value)}
                   maxLength={personaMax}
-                  placeholder="写写希望小白是什么样的人"
+                  placeholder="写写希望跟宠是什么样的人"
                   rows={6}
                   style={textareaStyle}
                 />
@@ -268,7 +278,7 @@ export default function SettingsPanel({ onClose }) {
               </Section>
 
               {/* ③ 日常作息 */}
-              <Section title="日常作息" hint="小白会参考，随时可以改">
+              <Section title="日常作息" hint="跟宠会参考，随时可以改">
                 <textarea
                   value={routine}
                   onChange={e => setRoutine(e.target.value)}
@@ -281,7 +291,7 @@ export default function SettingsPanel({ onClose }) {
               </Section>
 
               {/* ④ 用户手记 */}
-              <Section title="用户手记" hint="你想让小白知道的事，可以都写在这里">
+              <Section title="用户手记" hint="你想让跟宠知道的事，可以都写在这里">
                 <textarea
                   value={userMemo}
                   onChange={e => setUserMemo(e.target.value)}
@@ -295,8 +305,8 @@ export default function SettingsPanel({ onClose }) {
 
               {/* ⑤ AI 记忆 */}
               <Section
-                title="小白对你的印象"
-                hint="小白从对话里慢慢记下来的"
+                title="跟宠对你的印象"
+                hint="跟宠从对话里慢慢记下来的"
                 action={
                   <button
                     type="button"

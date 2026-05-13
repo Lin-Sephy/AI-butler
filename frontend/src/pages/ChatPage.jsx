@@ -43,6 +43,7 @@ function hasPlanIntent(text) {
 export default function ChatPage() {
   const {
     messages, loading, error, send, resetSession, mode, setMode,
+    companionName,
     sessionId, planConfirmed, lastCreatedTasks, clearPlanConfirmed,
     pendingDeletes, clearPendingDeletes, switchSession,
   } = useChat()
@@ -262,7 +263,7 @@ export default function ChatPage() {
         <input
           value={input}
           onChange={e => setInput(e.target.value)}
-          placeholder="跟小白说点什么..."
+          placeholder={`跟${companionName || '小白'}说点什么...`}
           disabled={sending}
           style={{
             flex: 1, padding: '10px 14px',
