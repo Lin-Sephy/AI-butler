@@ -13,15 +13,15 @@
  * 模式切换 UI（chat ↔ plan）和计划确认界面（planConfirmed 触发）由前端小克后续补。
  */
 
-import { useState, useRef, useEffect, Fragment } from 'react'
+import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext.jsx'
 import { useConfirm } from '../contexts/ConfirmContext.jsx'
 import StoatHalf from '../components/StoatHalf.jsx'
-import ChatBubble from '../components/ChatBubble.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import PlanConfirmModal from '../components/PlanConfirmModal.jsx'
 import DeleteConfirmModal from '../components/DeleteConfirmModal.jsx'
 import ErrorBanner from '../components/ErrorBanner.jsx'
+import { listSessions } from '../lib/chatApi.js'
 import { cleanAssistantText, renderAssistantText } from '../lib/text.jsx'
 
 const STOAT_WIDTH = 220
@@ -42,7 +42,7 @@ export default function ChatPage() {
   const {
     messages, loading, error, send, resetSession, mode, setMode,
     sessionId, planConfirmed, lastCreatedTasks, clearPlanConfirmed,
-    pendingDeletes, clearPendingDeletes,
+    pendingDeletes, clearPendingDeletes, switchSession,
   } = useChat()
   const confirm = useConfirm()
 
@@ -87,9 +87,16 @@ export default function ChatPage() {
   if (view === 'history') {
     return (
       <HistoryView
-        messages={messages}
+        currentSessionId={sessionId}
         onBack={() => setView('main')}
-        onNewSession={resetSession}
+        onNewSession={async () => {
+          await resetSession()
+          setView('main')
+        }}
+        onSelectSession={async id => {
+          await switchSession(id)
+          setView('main')
+        }}
         error={error}
       />
     )
@@ -288,10 +295,28 @@ export default function ChatPage() {
 
 // ════════════ 历史视图 ════════════
 
-function HistoryView({ messages, onBack, onNewSession, error }) {
-  const endRef = useRef(null)
+function HistoryView({ currentSessionId, onBack, onNewSession, onSelectSession, error }) {
   const confirm = useConfirm()
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  const [sessions, setSessions] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [localError, setLocalError] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        setLoading(true)
+        setLocalError(null)
+        const data = await listSessions()
+        if (alive) setSessions(data.sessions || [])
+      } catch (e) {
+        if (alive) setLocalError(e.message)
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false }
+  }, [])
 
   return (
     <div style={{
@@ -325,26 +350,69 @@ function HistoryView({ messages, onBack, onNewSession, error }) {
       }}>
         <BgPineLayer />
         {error && <ErrorBanner>{error}</ErrorBanner>}
+        {localError && <ErrorBanner>{localError}</ErrorBanner>}
         <div style={{ position: 'relative', zIndex: 1 }}>
-          {messages.length === 0 ? (
+          {loading ? (
             <p style={{ textAlign: 'center', color: 'var(--color-subtle)', padding: '40px 0' }}>
-              还没说过话呢
+              正在翻对话……
+            </p>
+          ) : sessions.length === 0 ? (
+            <p style={{ textAlign: 'center', color: 'var(--color-subtle)', padding: '40px 0' }}>
+              还没有历史对话
             </p>
           ) : (
-            messages.map((m, i) => {
-              const prev = i > 0 ? messages[i - 1] : null
-              const curMode = m.mode || 'chat'
-              const prevMode = prev ? (prev.mode || 'chat') : null
-              const showDivider = prev && prevMode !== curMode
-              return (
-                <Fragment key={i}>
-                  {showDivider && <ModeDivider mode={curMode} />}
-                  <ChatBubble message={m} />
-                </Fragment>
-              )
-            })
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}>
+              {sessions.map(s => {
+                const isCurrent = s.session_id === currentSessionId
+                return (
+                  <button
+                    key={s.session_id}
+                    type="button"
+                    onClick={() => onSelectSession(s.session_id)}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      padding: '14px 16px',
+                      borderRadius: 8,
+                      border: `1px solid ${isCurrent ? 'var(--color-primary)' : 'var(--color-line)'}`,
+                      background: isCurrent ? 'var(--color-primary-soft)' : 'var(--color-surface)',
+                      color: 'var(--color-text)',
+                      font: 'inherit',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
+                    }}
+                  >
+                    <span style={{
+                      fontSize: 14,
+                      lineHeight: 1.4,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {s.title}
+                    </span>
+                    {isCurrent && (
+                      <span style={{
+                        flexShrink: 0,
+                        fontSize: 11,
+                        color: 'var(--color-primary)',
+                      }}>
+                        当前
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
           )}
-          <div ref={endRef} />
         </div>
       </main>
     </div>

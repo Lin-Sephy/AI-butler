@@ -29,6 +29,7 @@ import { newSession, loadHistory, sendMessage } from '../lib/chatApi.js'
 
 const SESSION_KEY = 'ai-butler-session-id'
 const MODE_KEY = 'ai-butler-chat-mode'
+const DEFAULT_GREETING = '来啦～'
 
 const ChatContext = createContext(null)
 
@@ -73,8 +74,9 @@ export function ChatProvider({ children }) {
         if (saved) {
           // 有历史 session → 拉历史
           const data = await loadHistory(saved)
+          const history = data.messages || []
           setSessionId(saved)
-          setMessages(data.messages || [])
+          setMessages(history.length > 0 ? history : [{ role: 'assistant', content: DEFAULT_GREETING, mode: 'chat' }])
         } else {
           // 无 session → 新建
           const { session_id, greeting } = await newSession()
@@ -135,12 +137,30 @@ export function ChatProvider({ children }) {
       const { session_id, greeting } = await newSession()
       localStorage.setItem(SESSION_KEY, session_id)
       setSessionId(session_id)
-      setMessages(greeting ? [{ role: 'assistant', content: greeting, mode: 'chat' }] : [])
+      setMessages([{ role: 'assistant', content: greeting || DEFAULT_GREETING, mode: 'chat' }])
       setPlanConfirmed(false)
     } catch (e) {
       setError(e.message)
     }
   }, [])
+
+  const switchSession = useCallback(async nextSessionId => {
+    if (!nextSessionId || nextSessionId === sessionId) return
+    setError(null)
+    try {
+      const data = await loadHistory(nextSessionId)
+      const history = data.messages || []
+      localStorage.setItem(SESSION_KEY, nextSessionId)
+      setSessionId(nextSessionId)
+      setMessages(history.length > 0 ? history : [{ role: 'assistant', content: DEFAULT_GREETING, mode: 'chat' }])
+      setPlanConfirmed(false)
+      setLastCreatedTasks([])
+      setPendingDeletes([])
+    } catch (e) {
+      setError(e.message)
+      throw e
+    }
+  }, [sessionId])
 
   const value = {
     sessionId,
@@ -156,6 +176,7 @@ export function ChatProvider({ children }) {
     clearPlanConfirmed,
     clearPendingDeletes,
     resetSession,
+    switchSession,
   }
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

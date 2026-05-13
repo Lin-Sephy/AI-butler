@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from db.database import (
     init_db, save_action_log, get_user_memo, save_user_memo,
-    clear_ai_memo, save_chat_message, load_session_messages, now_cn,
+    clear_ai_memo, save_chat_message, load_session_messages, list_chat_sessions, now_cn,
     get_companion_name, save_companion_name,
     get_custom_persona, save_custom_persona,
     get_companion_profile as db_get_companion_profile,
@@ -483,11 +483,20 @@ def clear_ai_memory(user_id: str = Depends(get_current_user_id)):
 
 @app.post("/api/session/new")
 def new_session(user_id: str = Depends(get_current_user_id)):
-    """创建新会话。"""
+    """创建新会话 ID。
+
+    不在这里写入欢迎语。空白新会话只有在用户发出第一条消息后，
+    才会由 /api/chat 写入 chat_session，避免污染历史会话列表。
+    """
     session_id = str(uuid.uuid4())
     greeting = "来啦～"
-    save_chat_message(user_id, session_id, "assistant", greeting, "chat")
     return {"session_id": session_id, "greeting": greeting}
+
+
+@app.get("/api/sessions")
+def get_sessions(user_id: str = Depends(get_current_user_id)):
+    """获取有用户消息的历史会话列表。"""
+    return {"sessions": list_chat_sessions(user_id)}
 
 
 @app.get("/api/session/{session_id}/messages")

@@ -320,6 +320,79 @@ def load_session_messages(user_id: str, session_id: str, mode: str | None = None
     ]
 
 
+def _format_session_title_date(date_text: str | None) -> str:
+    """把 session_date / created_at 转成会话标题里的 M月D日。"""
+    if not date_text:
+        dt = now_cn()
+        return f"{dt.month}月{dt.day}日"
+    try:
+        if "T" in date_text:
+            dt = datetime.fromisoformat(date_text.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(_CN_TZ)
+            return f"{dt.month}月{dt.day}日"
+        dt = datetime.strptime(date_text[:10], "%Y-%m-%d")
+        return f"{dt.month}月{dt.day}日"
+    except (ValueError, TypeError):
+        return date_text[:10]
+
+
+def list_chat_sessions(user_id: str, limit: int = 1000) -> list[dict]:
+    """列出有用户消息的会话。
+
+    空白新会话不会写入 chat_session；这里再按 user_count > 0 过滤一层，
+    避免历史里的旧空会话进入会话列表。
+    """
+    rows = _get("chat_session", {
+        "user_id": f"eq.{user_id}",
+        "select": "session_id,role,mode,session_date,created_at",
+        "order": "created_at.desc",
+        "limit": str(limit),
+    })
+
+    sessions: dict[str, dict] = {}
+    for row in rows:
+        sid = row.get("session_id")
+        if not sid:
+            continue
+        created_at = row.get("created_at") or ""
+        session_date = row.get("session_date")
+        item = sessions.setdefault(sid, {
+            "session_id": sid,
+            "latest_at": created_at,
+            "first_at": created_at,
+            "session_date": session_date,
+            "message_count": 0,
+            "user_count": 0,
+            "has_plan": False,
+        })
+        item["message_count"] += 1
+        if row.get("role") == "user":
+            item["user_count"] += 1
+        if (row.get("mode") or "chat") == "plan":
+            item["has_plan"] = True
+        if created_at and (not item["first_at"] or created_at < item["first_at"]):
+            item["first_at"] = created_at
+        if session_date and not item.get("session_date"):
+            item["session_date"] = session_date
+
+    result = []
+    for item in sessions.values():
+        if item["user_count"] <= 0:
+            continue
+        date_label = _format_session_title_date(item.get("session_date") or item.get("first_at"))
+        kind = "任务规划" if item["has_plan"] else "闲聊"
+        result.append({
+            "session_id": item["session_id"],
+            "title": f"{date_label}{kind}",
+            "has_plan": item["has_plan"],
+            "message_count": item["message_count"],
+            "latest_at": item["latest_at"],
+        })
+
+    return sorted(result, key=lambda s: s.get("latest_at") or "", reverse=True)
+
+
 # ---- action_log CRUD ----
 
 def save_action_log(user_id: str, recommendation: str, user_action: str,

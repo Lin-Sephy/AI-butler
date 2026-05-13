@@ -24,6 +24,10 @@ export async function loadHistory(sessionId) {
   return apiFetch(`/api/session/${sessionId}/messages`)
 }
 
+export async function listSessions() {
+  return apiFetch('/api/sessions')
+}
+
 /**
  * 发送一条聊天消息。
  *
