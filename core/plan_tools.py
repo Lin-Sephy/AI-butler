@@ -10,7 +10,7 @@ import json
 import logging
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from db.database import (
     get_tasks_recent,
@@ -240,18 +240,25 @@ def _tool_query_stats(user_id: str, args: dict) -> dict:
     ]
     avg_minutes = round(sum(durations) / len(durations), 1) if durations else None
 
-    # 最常专注时段（按 started_at 的小时分桶）
-    hour_counter: Counter = Counter()
+    # 最常专注时段：和数据页 hours_24 保持一致，按北京时间 started_at 分桶并累计完成分钟数。
+    hours = [0] * 24
     for t in tasks:
+        if t.get("status") != "completed":
+            continue
         started = t.get("started_at")
         if started:
-            try:
-                dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
-                hour_counter[dt.hour] += 1
-            except (ValueError, AttributeError):
-                pass
-    top_hours = hour_counter.most_common(3)
-    top_hours_desc = [f"{h:02d}:00-{h + 1:02d}:00 ({n}次)" for h, n in top_hours] if top_hours else []
+            dt = _to_cn_datetime(started)
+            if dt:
+                hours[dt.hour] += (t.get("default_minutes") or 0)
+    top_hours = sorted(
+        [(h, minutes) for h, minutes in enumerate(hours) if minutes > 0],
+        key=lambda item: item[1],
+        reverse=True,
+    )[:3]
+    top_hours_desc = [
+        f"{h:02d}:00-{(h + 1) % 24:02d}:00 ({minutes}分钟)"
+        for h, minutes in top_hours
+    ]
 
     # 最常做的事
     keyword_counter: Counter = Counter(t["keyword"] for t in tasks if t.get("keyword"))
@@ -266,6 +273,18 @@ def _tool_query_stats(user_id: str, args: dict) -> dict:
         "最常专注时段": top_hours_desc or ["数据不足"],
         "最常做的事": top_keywords or ["暂无"],
     }
+
+
+def _to_cn_datetime(iso: str):
+    """ISO 时间字符串转北京时间。Supabase 可能返回 UTC Z，统计口径要和数据页一致。"""
+    CN_TZ = timezone(timedelta(hours=8))
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=CN_TZ)
+    return dt.astimezone(CN_TZ)
 
 
 def _tool_query_schedule(user_id: str, args: dict) -> dict:
