@@ -31,7 +31,7 @@ function Bars({ data, showLabelFn, tooltipFn, initialScrollPercent = 0, wideLabe
       style={{
         overflowX: 'auto',
         overflowY: 'visible',
-        padding: '10px 0 18px',
+        padding: '36px 0 18px',
         scrollbarWidth: 'thin',
       }}
     >

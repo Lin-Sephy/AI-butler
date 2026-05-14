@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 
 export default function FocusOverlay({ task, onComplete, onAbandon }) {
-  const [elapsed, setElapsed] = useState(0)
+  const initialStartTime = parseTaskTime(task.started_at) || Date.now()
+  const initialElapsed = Math.max(0, Math.floor((Date.now() - initialStartTime) / 1000))
+  const [elapsed, setElapsed] = useState(initialElapsed)
   const [paused, setPaused] = useState(false)
   const [tooShortHint, setTooShortHint] = useState(false)
   const intervalRef = useRef(null)
   // 以 Date.now() 为基准，避免 tab 不可见时 setInterval 被浏览器节流导致秒数丢失
-  const startTimeRef = useRef(Date.now())
+  const startTimeRef = useRef(initialStartTime)
   const pausedAccumRef = useRef(0) // 累计暂停毫秒
   const pauseStartRef = useRef(null) // 当前暂停段起点，未暂停时为 null
 
@@ -30,6 +32,7 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
       const now = Date.now()
       setElapsed(Math.floor((now - startTimeRef.current - pausedAccumRef.current) / 1000))
     }
+    recompute()
     intervalRef.current = setInterval(recompute, 1000)
     return () => clearInterval(intervalRef.current)
   }, [paused])
@@ -166,4 +169,10 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
       </div>
     </div>
   )
+}
+
+function parseTaskTime(value) {
+  if (!value) return null
+  const ms = Date.parse(value)
+  return Number.isNaN(ms) ? null : ms
 }
