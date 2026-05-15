@@ -5,6 +5,8 @@ import TaskCard from '../components/TaskCard.jsx'
 import NewTaskModal from '../components/NewTaskModal.jsx'
 import FocusOverlay from '../components/FocusOverlay.jsx'
 
+const TASK_DAY_START_HOUR = 4
+
 export default function TasksPage() {
   const showToast = useToast()
   const [tasks, setTasks] = useState([])
@@ -98,9 +100,7 @@ export default function TasksPage() {
   }
 
   // 分组
-  const pad = n => String(n).padStart(2, '0')
-  const now = new Date()
-  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  const todayStr = getTaskDayKey()
 
   const unscheduled = tasks.filter(t =>
     !t.scheduled_at && ['idle', 'paused', 'executing'].includes(t.status)
@@ -108,12 +108,12 @@ export default function TasksPage() {
   const allScheduled = tasks
     .filter(t => t.scheduled_at && ['idle', 'scheduled', 'paused', 'executing'].includes(t.status))
     .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at))
-  const todayScheduled = allScheduled.filter(t => t.scheduled_at.slice(0, 10) === todayStr)
-  const futureScheduled = allScheduled.filter(t => t.scheduled_at.slice(0, 10) > todayStr)
+  const todayScheduled = allScheduled.filter(t => getTaskDayKeyFromIso(t.scheduled_at) === todayStr)
+  const futureScheduled = allScheduled.filter(t => getTaskDayKeyFromIso(t.scheduled_at) > todayStr)
 
   const futureByDate = {}
   futureScheduled.forEach(t => {
-    const d = t.scheduled_at.slice(0, 10)
+    const d = getTaskDayKeyFromIso(t.scheduled_at)
     if (!futureByDate[d]) futureByDate[d] = []
     futureByDate[d].push(t)
   })
@@ -368,10 +368,9 @@ function TimelineSection({ tasks, cardHandlers }) {
 }
 
 function DateDivider({ date, today }) {
-  const pad = n => String(n).padStart(2, '0')
-  const tomorrow = new Date()
+  const tomorrow = parseDateKey(today)
   tomorrow.setDate(tomorrow.getDate() + 1)
-  const tmrStr = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`
+  const tmrStr = formatDateKey(tomorrow)
   let label
   if (date === tmrStr) label = '明天'
   else label = date.slice(5)
@@ -384,4 +383,32 @@ function DateDivider({ date, today }) {
       {label}
     </div>
   )
+}
+
+function pad(n) {
+  return String(n).padStart(2, '0')
+}
+
+function formatDateKey(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function parseDateKey(key) {
+  const [year, month, day] = key.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function getTaskDayKey(date = new Date()) {
+  const d = new Date(date)
+  if (d.getHours() < TASK_DAY_START_HOUR) d.setDate(d.getDate() - 1)
+  return formatDateKey(d)
+}
+
+function getTaskDayKeyFromIso(iso) {
+  if (!iso) return ''
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})/)
+  if (!m) return iso.slice(0, 10)
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  if (Number(m[4]) < TASK_DAY_START_HOUR) d.setDate(d.getDate() - 1)
+  return formatDateKey(d)
 }

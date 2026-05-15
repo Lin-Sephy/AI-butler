@@ -5,7 +5,7 @@ v2 多用户改造（2026-04-15）：所有公开函数第一个参数都是 use
 不带 user_id 过滤理论上可能跨用户操作（虽然 RLS 是 backstop，但代码层不能依赖它）。
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from db.database import _get, _post, _patch, _delete, now_cn
 
 # idle 任务留存天数：超过就自动结转为 abandoned
@@ -13,6 +13,21 @@ from db.database import _get, _post, _patch, _delete, now_cn
 # idle 第 2 天就是这种僵尸态）。现在一过当天 idle 就转 abandoned，
 # abandoned 进前端"已放弃"折叠区（2 天内可恢复）
 STALE_IDLE_DAYS = 1
+TASK_DAY_START_HOUR = 4
+
+
+def _task_day_start(now=None):
+    """返回当前任务日的起点。任务日按北京时间 04:00 刷新。"""
+    now = now or now_cn()
+    start = now.replace(hour=TASK_DAY_START_HOUR, minute=0, second=0, microsecond=0)
+    if now < start:
+        start -= timedelta(days=1)
+    return start
+
+
+def _task_day_window(now=None):
+    start = _task_day_start(now)
+    return start, start + timedelta(days=1)
 
 
 def _get_task_by_id(user_id: str, task_id: int) -> dict:
@@ -133,7 +148,7 @@ def _sweep_stale_idle_tasks(user_id: str) -> None:
     静默失败——sweep 不该影响主流程，网络/DB 抖动时下次再 sweep 即可。
     """
     now = now_cn()
-    cutoff = (now - timedelta(days=STALE_IDLE_DAYS)).isoformat()
+    cutoff = (_task_day_start(now) - timedelta(days=STALE_IDLE_DAYS)).isoformat()
     try:
         _patch("task", {
             "user_id": f"eq.{user_id}",
@@ -144,8 +159,53 @@ def _sweep_stale_idle_tasks(user_id: str) -> None:
         pass
 
 
+def _parse_task_datetime(value: str | None):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _sweep_finished_focus_tasks(user_id: str) -> None:
+    """把已到倒计时终点但仍 executing 的 focus 任务结算为 completed。"""
+    now = now_cn()
+    try:
+        rows = _get("task", {
+            "user_id": f"eq.{user_id}",
+            "status": "eq.executing",
+            "started_at": "not.is.null",
+            "default_minutes": "not.is.null",
+            "select": "id,started_at,default_minutes",
+        })
+    except Exception:
+        return
+
+    for task in rows:
+        started = _parse_task_datetime(task.get("started_at"))
+        minutes = task.get("default_minutes")
+        try:
+            minutes = int(minutes)
+        except (TypeError, ValueError):
+            continue
+        if not started or minutes <= 0:
+            continue
+        if now >= started + timedelta(minutes=minutes):
+            try:
+                _patch("task", {
+                    "id": f"eq.{task['id']}",
+                    "user_id": f"eq.{user_id}",
+                    "status": "eq.executing",
+                }, {"status": "completed", "completed_at": (started + timedelta(minutes=minutes)).isoformat()},
+                    return_row=False)
+            except Exception:
+                pass
+
+
 def get_today_tasks(user_id: str) -> list[dict]:
     """获取今日任务视图：活跃任务（今天 created_at 且非 abandoned）
+    + 跨天仍在执行/暂停的任务
     + 最近 2 天 abandoned 任务（供前端"已放弃"折叠区 + 恢复按钮）。
 
     读前先 sweep 一次陈年 idle——超过 STALE_IDLE_DAYS 的 idle 自动结转 abandoned。
@@ -153,11 +213,13 @@ def get_today_tasks(user_id: str) -> list[dict]:
     from db.database import ABANDONED_RETENTION_DAYS
 
     _sweep_stale_idle_tasks(user_id)
+    _sweep_finished_focus_tasks(user_id)
     now = now_cn()
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    today_start_dt, today_end_dt = _task_day_window(now)
+    today_start = today_start_dt.isoformat()
     abandoned_cutoff = (now - timedelta(days=ABANDONED_RETENTION_DAYS)).isoformat()
 
-    today_end = now.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
+    today_end = today_end_dt.isoformat()
 
     # 今天创建的活跃任务（含 completed、排除 abandoned）
     active = _get("task", {
@@ -172,7 +234,7 @@ def get_today_tasks(user_id: str) -> list[dict]:
     scheduled_today = _get("task", [
         ("user_id", f"eq.{user_id}"),
         ("scheduled_at", f"gte.{today_start}"),
-        ("scheduled_at", f"lte.{today_end}"),
+        ("scheduled_at", f"lt.{today_end}"),
         ("status", "neq.abandoned"),
         ("select", "*"),
     ])
@@ -180,6 +242,19 @@ def get_today_tasks(user_id: str) -> list[dict]:
     # 合并去重（同一个任务可能两个查询都命中）
     seen = {t["id"] for t in active}
     for t in scheduled_today:
+        if t["id"] not in seen:
+            active.append(t)
+            seen.add(t["id"])
+
+    # 跨天仍在执行/暂停的任务也必须出现在任务页。
+    # 否则后端 start_task 会因为已有 executing 拦截，前端却看不到那条任务，用户无法处理。
+    carried_active = _get("task", {
+        "user_id": f"eq.{user_id}",
+        "status": "in.(executing,paused)",
+        "select": "*",
+        "order": "created_at.desc",
+    })
+    for t in carried_active:
         if t["id"] not in seen:
             active.append(t)
             seen.add(t["id"])
@@ -219,6 +294,7 @@ def restore_task(user_id: str, task_id: int) -> dict | None:
 
 def get_executing_task(user_id: str) -> dict | None:
     """获取当前正在执行的任务，没有则返回 None。"""
+    _sweep_finished_focus_tasks(user_id)
     rows = _get("task", {
         "user_id": f"eq.{user_id}",
         "status": "eq.executing",
@@ -231,6 +307,7 @@ def get_executing_task(user_id: str) -> dict | None:
 
 def get_active_task(user_id: str) -> dict | None:
     """获取当前活跃任务（executing 或 paused），没有则返回 None。"""
+    _sweep_finished_focus_tasks(user_id)
     rows = _get("task", {
         "user_id": f"eq.{user_id}",
         "status": "in.(executing,paused)",
@@ -321,8 +398,11 @@ def spawn_daily_tasks(user_id: str) -> None:
 
 
 def _spawn_daily_tasks_impl(user_id: str) -> None:
-    today_start = now_cn().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    now = now_cn().isoformat()
+    now_dt = now_cn()
+    today_start_dt, today_end_dt = _task_day_window(now_dt)
+    today_start = today_start_dt.isoformat()
+    today_end = today_end_dt.isoformat()
+    now = now_dt.isoformat()
 
     recurring = _get("recurring_task", {
         "user_id": f"eq.{user_id}",
@@ -330,27 +410,28 @@ def _spawn_daily_tasks_impl(user_id: str) -> None:
         "select": "*",
     })
 
-    today_date = now_cn().strftime("%Y-%m-%d")
+    today_date = now_dt.strftime("%Y-%m-%d")
 
     for rec in recurring:
         # 检查今天是否已有该循环任务
-        existing = _get("task", {
-            "user_id": f"eq.{user_id}",
-            "keyword": f"eq.{rec['keyword']}",
-            "created_at": f"gte.{today_start}",
-            "combo": "eq.recurring",
-            "status": "in.(idle,executing,paused,completed,abandoned,scheduled)",
-            "select": "id",
-            "limit": "1",
-        })
+        existing = _get("task", [
+            ("user_id", f"eq.{user_id}"),
+            ("keyword", f"eq.{rec['keyword']}"),
+            ("created_at", f"gte.{today_start}"),
+            ("created_at", f"lt.{today_end}"),
+            ("combo", "eq.recurring"),
+            ("status", "in.(idle,executing,paused,completed,abandoned,scheduled)"),
+            ("select", "id"),
+            ("limit", "1"),
+        ])
         if not existing:
             stime = rec.get("scheduled_time")
             if stime:
-                now_time = now_cn().strftime("%H:%M")
+                now_time = now_dt.strftime("%H:%M")
                 if stime > now_time:
                     scheduled_at = f"{today_date}T{stime}:00"
                 else:
-                    tomorrow = (now_cn() + timedelta(days=1)).strftime("%Y-%m-%d")
+                    tomorrow = (now_dt + timedelta(days=1)).strftime("%Y-%m-%d")
                     scheduled_at = f"{tomorrow}T{stime}:00"
                 status = "scheduled"
             else:
