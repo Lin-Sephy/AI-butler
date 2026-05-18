@@ -14,6 +14,7 @@ from db.database import _get, _post, _patch, _delete, now_cn
 # abandoned 进前端"已放弃"折叠区（2 天内可恢复）
 STALE_IDLE_DAYS = 1
 TASK_DAY_START_HOUR = 4
+MAX_OPEN_FOCUS_MINUTES = 8 * 60
 
 
 def _task_day_start(now=None):
@@ -99,9 +100,11 @@ def complete_task(user_id: str, task_id: int) -> dict:
     started = task.get("started_at")
     if started:
         try:
-            from datetime import datetime
-            dt = datetime.fromisoformat(started)
-            actual = max(1, round((now - dt).total_seconds() / 60))
+            dt = _parse_task_datetime(started)
+            if dt is None:
+                raise ValueError("invalid started_at")
+            cap = int(task.get("default_minutes") or MAX_OPEN_FOCUS_MINUTES)
+            actual = max(1, min(cap, round((now - dt).total_seconds() / 60)))
             updates["default_minutes"] = actual
         except (ValueError, TypeError):
             pass
@@ -169,14 +172,17 @@ def _parse_task_datetime(value: str | None):
 
 
 def _sweep_finished_focus_tasks(user_id: str) -> None:
-    """把已到倒计时终点但仍 executing 的 focus 任务结算为 completed。"""
+    """把已到终点但仍 executing 的任务结算为 completed。
+
+    - 倒计时 focus：按 default_minutes 到点结算。
+    - 正计时 open：没有 default_minutes，按 MAX_OPEN_FOCUS_MINUTES 封顶结算。
+    """
     now = now_cn()
     try:
         rows = _get("task", {
             "user_id": f"eq.{user_id}",
             "status": "eq.executing",
             "started_at": "not.is.null",
-            "default_minutes": "not.is.null",
             "select": "id,started_at,default_minutes",
         })
     except Exception:
@@ -184,7 +190,7 @@ def _sweep_finished_focus_tasks(user_id: str) -> None:
 
     for task in rows:
         started = _parse_task_datetime(task.get("started_at"))
-        minutes = task.get("default_minutes")
+        minutes = task.get("default_minutes") or MAX_OPEN_FOCUS_MINUTES
         try:
             minutes = int(minutes)
         except (TypeError, ValueError):
