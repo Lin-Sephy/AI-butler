@@ -114,7 +114,7 @@ def get_chat_prompt(companion_name: str = "小白",
         "chat" → 闲聊模式：身份 + 性格（如有）
         "plan" → 计划模式：身份 + 性格（如有）+ 计划模块
     """
-    persona_block = custom_persona.strip() if custom_persona else ""
+    persona_block = custom_persona.strip() if custom_persona else PERSONA_infp
 
     parts = [IDENTITY_LINE.format(companion_name=companion_name)]
     parts.append("")  # 空行分隔
@@ -141,7 +141,8 @@ def build_chat_message(user_input: str,
     from db.database import now_cn
     now = now_cn()
     time_str = now.strftime("%Y-%m-%d %H:%M")
-    parts = [f"当前时间：{time_str}"]
+    weekday = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][now.weekday()]
+    parts = [f"当前时间：{time_str}，{weekday}"]
     if user_memo.strip():
         parts.append(f"用户手记：{user_memo.strip()}")
     if ai_memo.strip():
