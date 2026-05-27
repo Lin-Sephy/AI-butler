@@ -4,8 +4,11 @@ import { useToast } from '../contexts/ToastContext.jsx'
 import TaskCard from '../components/TaskCard.jsx'
 import NewTaskModal from '../components/NewTaskModal.jsx'
 import FocusOverlay from '../components/FocusOverlay.jsx'
+import { readLocalBool, writeLocalBool } from '../lib/localPrefs.js'
 
 const TASK_DAY_START_HOUR = 4
+const COMPLETED_OPEN_KEY = 'ai-butler-tasks-completed-open'
+const ABANDONED_OPEN_KEY = 'ai-butler-tasks-abandoned-open'
 
 export default function TasksPage() {
   const showToast = useToast()
@@ -15,8 +18,18 @@ export default function TasksPage() {
   const [error, setError] = useState(null)
   const [showNewTask, setShowNewTask] = useState(false)
   const [focusTask, setFocusTask] = useState(null)
-  const [completedOpen, setCompletedOpen] = useState(false)
-  const [abandonedOpen, setAbandonedOpen] = useState(false)
+  const [completedOpen, setCompletedOpenRaw] = useState(() => readLocalBool(COMPLETED_OPEN_KEY))
+  const [abandonedOpen, setAbandonedOpenRaw] = useState(() => readLocalBool(ABANDONED_OPEN_KEY))
+
+  function setCompletedOpen(next) {
+    setCompletedOpenRaw(next)
+    writeLocalBool(COMPLETED_OPEN_KEY, next)
+  }
+
+  function setAbandonedOpen(next) {
+    setAbandonedOpenRaw(next)
+    writeLocalBool(ABANDONED_OPEN_KEY, next)
+  }
 
   const fetchTasks = useCallback(async () => {
     if (firstLoad) setLoading(true)

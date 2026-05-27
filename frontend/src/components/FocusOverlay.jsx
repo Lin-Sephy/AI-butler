@@ -6,7 +6,9 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
   const [elapsed, setElapsed] = useState(initialElapsed)
   const [paused, setPaused] = useState(false)
   const [tooShortHint, setTooShortHint] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const intervalRef = useRef(null)
+  const submittingRef = useRef(false)
   // 以 Date.now() 为基准，避免 tab 不可见时 setInterval 被浏览器节流导致秒数丢失
   const startTimeRef = useRef(initialStartTime)
   const pausedAccumRef = useRef(0) // 累计暂停毫秒
@@ -15,6 +17,40 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
   const totalSeconds = (task.default_minutes || 25) * 60
   const isCountdown = !!task.default_minutes
   const remaining = Math.max(0, totalSeconds - elapsed)
+
+  function currentElapsedSeconds() {
+    if (paused && pauseStartRef.current !== null) {
+      return Math.floor((pauseStartRef.current - startTimeRef.current - pausedAccumRef.current) / 1000)
+    }
+    return Math.floor((Date.now() - startTimeRef.current - pausedAccumRef.current) / 1000)
+  }
+
+  async function submit(action) {
+    if (submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
+    try {
+      if (action === 'complete') {
+        await onComplete(task.id)
+      } else {
+        await onAbandon(task.id)
+      }
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
+  }
+
+  function handleManualComplete() {
+    const latestElapsed = currentElapsedSeconds()
+    setElapsed(latestElapsed)
+    if (latestElapsed < 60) {
+      setTooShortHint(true)
+      setTimeout(() => setTooShortHint(false), 2500)
+      return
+    }
+    submit('complete')
+  }
 
   // 暂停状态切换时维护累计暂停时长
   useEffect(() => {
@@ -39,8 +75,8 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
 
   // 倒计时归零自动完成
   useEffect(() => {
-    if (isCountdown && remaining <= 0) {
-      onComplete(task.id)
+    if (isCountdown && remaining <= 0 && !submittingRef.current) {
+      submit('complete')
     }
   }, [remaining, isCountdown])
 
@@ -113,43 +149,45 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
       <div style={{ display: 'flex', gap: 16 }}>
         <button
           onClick={() => setPaused(!paused)}
+          disabled={submitting}
           style={{
             padding: '12px 28px', borderRadius: 'var(--radius)',
             border: '1px solid var(--color-line)',
             background: 'var(--color-surface)',
             color: 'var(--color-text)',
-            fontSize: 15, fontFamily: 'inherit', cursor: 'pointer',
+            fontSize: 15, fontFamily: 'inherit',
+            cursor: submitting ? 'wait' : 'pointer',
+            opacity: submitting ? 0.5 : 1,
           }}
         >
           {paused ? '继续' : '暂停'}
         </button>
         <button
-          onClick={() => {
-            if (elapsed < 60) {
-              setTooShortHint(true)
-              setTimeout(() => setTooShortHint(false), 2500)
-              return
-            }
-            onComplete(task.id)
-          }}
+          onClick={handleManualComplete}
+          disabled={submitting}
           style={{
             padding: '12px 28px', borderRadius: 'var(--radius)',
             border: '1px solid var(--color-primary)',
             background: 'var(--color-primary)',
             color: '#fff',
-            fontSize: 15, fontFamily: 'inherit', cursor: 'pointer',
+            fontSize: 15, fontFamily: 'inherit',
+            cursor: submitting ? 'wait' : 'pointer',
+            opacity: submitting ? 0.65 : 1,
           }}
         >
-          完成
+          {submitting ? '处理中' : '完成'}
         </button>
         <button
-          onClick={() => onAbandon(task.id)}
+          onClick={() => submit('abandon')}
+          disabled={submitting}
           style={{
             padding: '12px 28px', borderRadius: 'var(--radius)',
             border: '1px solid var(--color-line)',
             background: 'transparent',
             color: 'var(--color-subtle)',
-            fontSize: 15, fontFamily: 'inherit', cursor: 'pointer',
+            fontSize: 15, fontFamily: 'inherit',
+            cursor: submitting ? 'wait' : 'pointer',
+            opacity: submitting ? 0.5 : 1,
           }}
         >
           放弃

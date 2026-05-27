@@ -12,6 +12,7 @@ import TasksPage from './pages/TasksPage.jsx'
 import ChatPage from './pages/ChatPage.jsx'
 import StatsPage from './pages/StatsPage.jsx'
 import MePage from './pages/MePage.jsx'
+import { readLocalPref, writeLocalPref } from './lib/localPrefs.js'
 
 const TABS = [
   { key: 'tasks',  label: '任务' },
@@ -26,10 +27,18 @@ const WAKE_MESSAGES = [
   '服务器刚睡醒正在洗脸...',
 ]
 
+const TAB_KEY = 'ai-butler-current-tab'
+const TAB_KEYS = TABS.map(t => t.key)
+
 export default function App() {
   const { user, loading, error } = useAuth()
-  const [tab, setTab] = useState('tasks')
+  const [tab, setTabRaw] = useState(() => readLocalPref(TAB_KEY, 'tasks', value => TAB_KEYS.includes(value)))
   const [wakeStage, setWakeStage] = useState(0)
+
+  function setTab(next) {
+    setTabRaw(next)
+    writeLocalPref(TAB_KEY, next)
+  }
 
   useEffect(() => {
     if (!loading) { setWakeStage(0); return }

@@ -5,6 +5,7 @@
 
 import { useState } from 'react'
 import SectionHead from './SectionHead.jsx'
+import { readLocalPref, writeLocalPref } from '../../lib/localPrefs.js'
 
 // 段颜色（按 pct 从大到小应用）
 const SEG_COLORS = [
@@ -20,6 +21,8 @@ const RANGES = [
   { key: 'week',  label: '周' },
   { key: 'month', label: '月' },
 ]
+const RANGE_KEYS = RANGES.map(r => r.key)
+const RANGE_PREF_KEY = 'ai-butler-stats-task-distribution-range'
 
 // 环形图几何参数（SVG viewBox 0 0 240 160）
 const CX = 120
@@ -100,11 +103,20 @@ function layout(items) {
 }
 
 export default function TaskDonut({ distribution }) {
-  const [range, setRange] = useState('day')
+  const [range, setRangeRaw] = useState(() => readLocalPref(
+    RANGE_PREF_KEY,
+    'day',
+    value => RANGE_KEYS.includes(value),
+  ))
   const bucket = distribution?.[range] || { total_minutes: 0, items: [] }
   const items = compact(bucket.items)
   const segments = layout(items)
   const totalText = formatMin(bucket.total_minutes)
+
+  function setRange(next) {
+    setRangeRaw(next)
+    writeLocalPref(RANGE_PREF_KEY, next)
+  }
 
   return (
     <section className="stats-card" style={{
