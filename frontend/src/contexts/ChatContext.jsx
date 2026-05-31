@@ -26,6 +26,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from './AuthContext.jsx'
 import { newSession, loadHistory, sendMessage } from '../lib/chatApi.js'
+import { initLocalDb, loadSessionMessages, saveSessionMessages, addSessionMessage } from '../lib/localDb.js'
 
 const SESSION_KEY = 'ai-butler-session-id'
 const MODE_KEY = 'ai-butler-chat-mode'
@@ -87,15 +88,29 @@ export function ChatProvider({ children }) {
 
     ;(async () => {
       try {
+        await initLocalDb()
         const saved = localStorage.getItem(SESSION_KEY)
         if (saved) {
-          // 有历史 session → 拉历史
+          const cached = await loadSessionMessages(saved)
+          if (cached.length > 0) {
+            setMessages(cached.map(msg => ({
+              role: msg.role,
+              content: msg.content,
+              mode: msg.mode,
+            })))
+          }
+
           const data = await loadHistory(saved)
           const history = data.messages || []
+          const finalHistory = history.length > 0 ? history : (
+            cached.length > 0 ? cached.map(msg => ({ role: msg.role, content: msg.content, mode: msg.mode })) : [{ role: 'assistant', content: DEFAULT_GREETING, mode: 'chat' }]
+          )
           setSessionId(saved)
-          setMessages(history.length > 0 ? history : [{ role: 'assistant', content: DEFAULT_GREETING, mode: 'chat' }])
+          setMessages(finalHistory)
+          if (history.length > 0) {
+            await saveSessionMessages(saved, history)
+          }
         } else {
-          // 无 session → 新建
           const { session_id, greeting } = await newSession()
           localStorage.setItem(SESSION_KEY, session_id)
           setSessionId(session_id)
@@ -114,18 +129,19 @@ export function ChatProvider({ children }) {
     async text => {
       if (!sessionId || !text.trim()) return
       setError(null)
-      // 本地乐观 append 用户消息（带当前 mode 标签，UI 渲染时按 mode 分段）
-      setMessages(m => [...m, { role: 'user', content: text, mode }])
+      const userMessage = { role: 'user', content: text, mode }
+      setMessages(m => [...m, userMessage])
+      addSessionMessage(sessionId, userMessage).catch(() => {})
       try {
         const resp = await sendMessage({ message: text, sessionId, mode })
-        setMessages(m => [...m, { role: 'assistant', content: resp.reply, mode }])
-        // 本轮 DS 通过 create_tasks 写入的任务（可能为空）
+        const assistantMessage = { role: 'assistant', content: resp.reply, mode }
+        setMessages(m => [...m, assistantMessage])
+        addSessionMessage(sessionId, assistantMessage).catch(() => {})
         const created = resp.created_tasks || []
         if (created.length > 0) {
           setLastCreatedTasks(created)
           setPlanConfirmed(true)
         }
-        // 本轮 DS 通过 delete_task(s) 提交的待删任务
         const deletes = resp.pending_deletes || []
         if (deletes.length > 0) {
           setPendingDeletes(deletes)
