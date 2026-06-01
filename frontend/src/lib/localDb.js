@@ -2,6 +2,7 @@ import Dexie from 'dexie'
 
 const DB_NAME = 'ai-butler-local-db'
 export const DB_SCHEMA_VERSION = 1
+export const SESSION_CACHE_LIMIT = 20
 
 export const db = new Dexie(DB_NAME)
 
@@ -33,6 +34,58 @@ function normalizeMessage(message, sessionId) {
     mode: message.mode || 'chat',
     timestamp: typeof message.timestamp === 'number' ? message.timestamp : Date.now(),
   }
+}
+
+function normalizeSession(session) {
+  const sessionId = session?.session_id || session?.id
+  if (!sessionId) return null
+  return {
+    ...session,
+    id: sessionId,
+    session_id: sessionId,
+    title: session.title || '未命名对话',
+    latest_at: session.latest_at || '',
+    updated_at: Date.now(),
+  }
+}
+
+function sortSessions(sessions) {
+  return [...sessions].sort((a, b) => {
+    const aKey = a.latest_at || String(a.updated_at || '')
+    const bKey = b.latest_at || String(b.updated_at || '')
+    return bKey.localeCompare(aKey)
+  })
+}
+
+export async function loadCachedSessions(limit = SESSION_CACHE_LIMIT) {
+  const rows = await db.sessions.toArray()
+  return sortSessions(rows).slice(0, limit)
+}
+
+export async function saveCachedSessions(sessions, limit = SESSION_CACHE_LIMIT) {
+  const rows = (sessions || [])
+    .map(normalizeSession)
+    .filter(Boolean)
+  const keepRows = sortSessions(rows).slice(0, limit)
+  const keepIds = new Set(keepRows.map(row => row.id))
+
+  await db.transaction('rw', db.sessions, db.chat_messages, async () => {
+    if (keepRows.length > 0) {
+      await db.sessions.bulkPut(keepRows)
+    }
+
+    const existing = await db.sessions.toArray()
+    const staleIds = existing
+      .map(row => row.id)
+      .filter(id => id && !keepIds.has(id))
+
+    if (staleIds.length > 0) {
+      await db.sessions.bulkDelete(staleIds)
+      await Promise.all(staleIds.map(id => (
+        db.chat_messages.where('session_id').equals(id).delete()
+      )))
+    }
+  })
 }
 
 export async function loadSessionMessages(sessionId) {

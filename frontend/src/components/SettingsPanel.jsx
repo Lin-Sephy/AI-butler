@@ -32,6 +32,7 @@ export default function SettingsPanel({ onClose }) {
 
   // 初始值快照，用于 dirty 检查；savedRef 表示上次已保存/缓存的值
   const savedRef = useRef({ name: '', persona: '', routine: '', userMemo: '' })
+  const draftRef = useRef({ name: '', persona: '', routine: '', userMemo: '' })
 
   // max_length（从各 API 读）
   const [personaMax, setPersonaMax] = useState(1000)
@@ -49,10 +50,15 @@ export default function SettingsPanel({ onClose }) {
   const [saveError, setSaveError] = useState(null)
   const [savedHint, setSavedHint] = useState(false)
 
+  useEffect(() => {
+    draftRef.current = { name, persona, routine, userMemo }
+  }, [name, persona, routine, userMemo])
+
   // ─── 首次加载：并行拉 4 个 GET（persona_presets 由 PersonaPresets 子组件自己拉） ───
   const loadAll = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
+    let showedCached = false
     try {
       await initLocalDb()
 
@@ -67,7 +73,11 @@ export default function SettingsPanel({ onClose }) {
         const cachedRoutine = routineRec?.value || {}
         const cachedUserMemo = userMemoRec?.value || {}
         const cachedAiMemo = aiMemoRec?.value || {}
+        const hasCachedSettings = Boolean(companionRec || routineRec || userMemoRec || aiMemoRec)
 
+        const confirmedCompanion = cachedCompanion.sync_status === 'confirmed' ? null : cachedCompanion.confirmed
+        const confirmedRoutine = cachedRoutine.sync_status === 'confirmed' ? null : cachedRoutine.confirmed
+        const confirmedUserMemo = cachedUserMemo.sync_status === 'confirmed' ? null : cachedUserMemo.confirmed
         const cachedName = cachedCompanion.name || ''
         const cachedPersona = cachedCompanion.custom_persona || ''
         setName(cachedName)
@@ -84,10 +94,14 @@ export default function SettingsPanel({ onClose }) {
         setAiMemo(cachedAiMemo.content || '')
 
         savedRef.current = {
-          name: cachedName,
-          persona: cachedPersona,
-          routine: cachedRoutine.routine || '',
-          userMemo: cachedUserMemo.content || '',
+          name: confirmedCompanion?.name ?? cachedName,
+          persona: confirmedCompanion?.custom_persona ?? cachedPersona,
+          routine: confirmedRoutine?.routine ?? (cachedRoutine.routine || ''),
+          userMemo: confirmedUserMemo?.content ?? (cachedUserMemo.content || ''),
+        }
+        if (hasCachedSettings) {
+          showedCached = true
+          setLoading(false)
         }
       } catch (e) {
         // 本地缓存读失败不致命，继续拉后端
@@ -107,17 +121,17 @@ export default function SettingsPanel({ onClose }) {
       const backendPersonaMax = companion.max_persona_length ?? 1000
 
       // 字段级合并：只有当用户没有在编辑（draft === saved）时才覆盖 draft
-      if (name === savedRef.current.name) {
+      if (draftRef.current.name === savedRef.current.name) {
         setName(companionName)
         setCompanionName(companionName)
       }
-      if (persona === savedRef.current.persona) setPersona(backendPersona)
+      if (draftRef.current.persona === savedRef.current.persona) setPersona(backendPersona)
       setPersonaMax(backendPersonaMax)
 
-      if (routine === savedRef.current.routine) setRoutine(routineData.routine || '')
+      if (draftRef.current.routine === savedRef.current.routine) setRoutine(routineData.routine || '')
       setRoutineMax(routineData.max_length ?? 500)
 
-      if (userMemo === savedRef.current.userMemo) setUserMemo(memoData.content || '')
+      if (draftRef.current.userMemo === savedRef.current.userMemo) setUserMemo(memoData.content || '')
       setMemoMax(memoData.max_length ?? 2000)
 
       // AI 记忆展示：非编辑区，直接更新
@@ -141,7 +155,11 @@ export default function SettingsPanel({ onClose }) {
         userMemo: memoData.content || '',
       }
     } catch (e) {
-      setLoadError(e.message || '加载失败')
+      if (showedCached) {
+        setSaveError(prev => prev || '暂时没连上云端，已显示本机保存的内容')
+      } else {
+        setLoadError(e.message || '加载失败')
+      }
     } finally {
       setLoading(false)
     }
@@ -174,9 +192,25 @@ export default function SettingsPanel({ onClose }) {
 
     // 先把草稿写到本地缓存，保护用户输入
     try {
-      await setSetting('companion', { name, custom_persona: persona, max_persona_length: personaMax })
-      await setSetting('daily_routine', { routine, max_length: routineMax })
-      await setSetting('user_memo', { content: userMemo, max_length: memoMax })
+      await setSetting('companion', {
+        name,
+        custom_persona: persona,
+        max_persona_length: personaMax,
+        sync_status: 'pending',
+        confirmed: { name: o.name, custom_persona: o.persona },
+      })
+      await setSetting('daily_routine', {
+        routine,
+        max_length: routineMax,
+        sync_status: 'pending',
+        confirmed: { routine: o.routine },
+      })
+      await setSetting('user_memo', {
+        content: userMemo,
+        max_length: memoMax,
+        sync_status: 'pending',
+        confirmed: { content: o.userMemo },
+      })
     } catch (e) {
       console.warn('写本地缓存失败', e)
     }
@@ -189,6 +223,7 @@ export default function SettingsPanel({ onClose }) {
     if (persona !== o.persona) companionPatch.custom_persona = persona
     if (Object.keys(companionPatch).length > 0) {
       jobs.push({
+        key: 'companion',
         label: '名字/性格',
         promise: apiFetch('/api/profile/companion', { method: 'PUT', body: companionPatch }),
         apply: snap => {
@@ -213,6 +248,7 @@ export default function SettingsPanel({ onClose }) {
     }
     if (routine !== o.routine) {
       jobs.push({
+        key: 'daily_routine',
         label: '日常作息',
         promise: apiFetch('/api/profile/daily_routine', { method: 'PUT', body: { routine } }),
         apply: snap => { snap.routine = routine },
@@ -220,6 +256,7 @@ export default function SettingsPanel({ onClose }) {
     }
     if (userMemo !== o.userMemo) {
       jobs.push({
+        key: 'user_memo',
         label: '手记',
         promise: apiFetch('/api/memo/user', { method: 'POST', body: { content: userMemo } }),
         apply: snap => { snap.userMemo = userMemo },
@@ -230,16 +267,42 @@ export default function SettingsPanel({ onClose }) {
     const results = await Promise.allSettled(jobs.map(j => j.promise))
     const nextSnap = { ...o }
     const failed = []
+    const failedKeys = new Set()
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') jobs[i].apply(nextSnap)
-      else failed.push({ label: jobs[i].label, reason: r.reason?.message })
+      else {
+        failed.push({ label: jobs[i].label, reason: r.reason?.message })
+        failedKeys.add(jobs[i].key)
+      }
     })
 
-    // 更新本地缓存为后端权威（或用户已写入的值）
+    // 成功字段写权威快照；失败字段保留用户草稿，避免刷新后丢输入。
     try {
-      await setSetting('companion', { name: nextSnap.name, custom_persona: nextSnap.persona, max_persona_length: personaMax })
-      await setSetting('daily_routine', { routine: nextSnap.routine, max_length: routineMax })
-      await setSetting('user_memo', { content: nextSnap.userMemo, max_length: memoMax })
+      await setSetting('companion', failedKeys.has('companion')
+        ? {
+            name,
+            custom_persona: persona,
+            max_persona_length: personaMax,
+            sync_status: 'failed',
+            confirmed: { name: nextSnap.name, custom_persona: nextSnap.persona },
+          }
+        : { name: nextSnap.name, custom_persona: nextSnap.persona, max_persona_length: personaMax, sync_status: 'confirmed' })
+      await setSetting('daily_routine', failedKeys.has('daily_routine')
+        ? {
+            routine,
+            max_length: routineMax,
+            sync_status: 'failed',
+            confirmed: { routine: nextSnap.routine },
+          }
+        : { routine: nextSnap.routine, max_length: routineMax, sync_status: 'confirmed' })
+      await setSetting('user_memo', failedKeys.has('user_memo')
+        ? {
+            content: userMemo,
+            max_length: memoMax,
+            sync_status: 'failed',
+            confirmed: { content: nextSnap.userMemo },
+          }
+        : { content: nextSnap.userMemo, max_length: memoMax, sync_status: 'confirmed' })
     } catch (e) {
       console.warn('写本地缓存失败', e)
     }
@@ -250,7 +313,7 @@ export default function SettingsPanel({ onClose }) {
       setSavedHint(true)
       setTimeout(() => setSavedHint(false), 1500)
     } else {
-      setSaveError(`部分没存上：${failed.map(f => `${f.label}（${f.reason || '未知错误'}）`).join('，')}`)
+      setSaveError(`已先保存在本机，云端同步失败：${failed.map(f => `${f.label}（${f.reason || '未知错误'}）`).join('，')}`)
     }
     setSaving(false)
   }

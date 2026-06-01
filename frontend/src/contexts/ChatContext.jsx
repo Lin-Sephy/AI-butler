@@ -87,10 +87,12 @@ export function ChatProvider({ children }) {
     bootstrapped.current = true
 
     ;(async () => {
+      let showedCached = false
       try {
         await initLocalDb()
         const saved = localStorage.getItem(SESSION_KEY)
         if (saved) {
+          setSessionId(saved)
           const cached = await loadSessionMessages(saved)
           if (cached.length > 0) {
             setMessages(cached.map(msg => ({
@@ -98,6 +100,8 @@ export function ChatProvider({ children }) {
               content: msg.content,
               mode: msg.mode,
             })))
+            showedCached = true
+            setLoading(false)
           }
 
           const data = await loadHistory(saved)
@@ -105,7 +109,6 @@ export function ChatProvider({ children }) {
           const finalHistory = history.length > 0 ? history : (
             cached.length > 0 ? cached.map(msg => ({ role: msg.role, content: msg.content, mode: msg.mode })) : [{ role: 'assistant', content: DEFAULT_GREETING, mode: 'chat' }]
           )
-          setSessionId(saved)
           setMessages(finalHistory)
           if (history.length > 0) {
             await saveSessionMessages(saved, history)
@@ -117,7 +120,11 @@ export function ChatProvider({ children }) {
           setMessages(greeting ? [{ role: 'assistant', content: greeting, mode: 'chat' }] : [])
         }
       } catch (e) {
-        setError(e.message)
+        if (showedCached) {
+          console.warn('后台校准聊天历史失败', e)
+        } else {
+          setError(e.message)
+        }
       } finally {
         setLoading(false)
       }
@@ -181,11 +188,38 @@ export function ChatProvider({ children }) {
     if (!nextSessionId || nextSessionId === sessionId) return
     setError(null)
     try {
+      const cached = await loadSessionMessages(nextSessionId)
+      if (cached.length > 0) {
+        localStorage.setItem(SESSION_KEY, nextSessionId)
+        setSessionId(nextSessionId)
+        setMessages(cached.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+          mode: msg.mode,
+        })))
+        setPlanConfirmed(false)
+        setLastCreatedTasks([])
+        setPendingDeletes([])
+
+        loadHistory(nextSessionId)
+          .then(async data => {
+            if (localStorage.getItem(SESSION_KEY) !== nextSessionId) return
+            const history = data.messages || []
+            setMessages(history.length > 0 ? history : [{ role: 'assistant', content: DEFAULT_GREETING, mode: 'chat' }])
+            await saveSessionMessages(nextSessionId, history)
+          })
+          .catch(e => {
+            console.warn('后台校准切换会话失败', e)
+          })
+        return
+      }
+
       const data = await loadHistory(nextSessionId)
       const history = data.messages || []
       localStorage.setItem(SESSION_KEY, nextSessionId)
       setSessionId(nextSessionId)
       setMessages(history.length > 0 ? history : [{ role: 'assistant', content: DEFAULT_GREETING, mode: 'chat' }])
+      await saveSessionMessages(nextSessionId, history)
       setPlanConfirmed(false)
       setLastCreatedTasks([])
       setPendingDeletes([])

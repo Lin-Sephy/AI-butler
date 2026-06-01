@@ -24,6 +24,7 @@ import DeleteConfirmModal from '../components/DeleteConfirmModal.jsx'
 import ErrorBanner from '../components/ErrorBanner.jsx'
 import stoatAvatar from '../assets/stoat-front.svg'
 import { listSessions, loadHistory } from '../lib/chatApi.js'
+import { initLocalDb, loadCachedSessions, loadSessionMessages, saveCachedSessions, saveSessionMessages } from '../lib/localDb.js'
 import { cleanAssistantText, renderAssistantText } from '../lib/text.jsx'
 
 const STOAT_WIDTH = 220
@@ -310,13 +311,28 @@ function HistoryView({ currentSessionId, onBack, onNewSession, onSelectSession, 
   useEffect(() => {
     let alive = true
     ;(async () => {
+      let showedCached = false
       try {
         setLoading(true)
         setLocalError(null)
+        await initLocalDb()
+        const cached = await loadCachedSessions()
+        if (alive && cached.length > 0) {
+          showedCached = true
+          setSessions(cached)
+          setLoading(false)
+        }
+
         const data = await listSessions()
-        if (alive) setSessions(data.sessions || [])
+        const remoteSessions = data.sessions || []
+        if (alive) setSessions(remoteSessions)
+        await saveCachedSessions(remoteSessions)
       } catch (e) {
-        if (alive) setLocalError(e.message)
+        if (alive && showedCached) {
+          setLocalError('暂时没连上云端，已显示最近缓存的对话')
+        } else if (alive) {
+          setLocalError(e.message)
+        }
       } finally {
         if (alive) setLoading(false)
       }
@@ -464,13 +480,32 @@ function ConversationDetailView({ session, onBack, error }) {
   useEffect(() => {
     let alive = true
     ;(async () => {
+      let showedCached = false
       try {
         setLoading(true)
         setLocalError(null)
+        await initLocalDb()
+        const cached = await loadSessionMessages(session.session_id)
+        if (alive && cached.length > 0) {
+          showedCached = true
+          setMessages(cached.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            mode: msg.mode,
+          })))
+          setLoading(false)
+        }
+
         const data = await loadHistory(session.session_id)
-        if (alive) setMessages(data.messages || [])
+        const remoteMessages = data.messages || []
+        if (alive) setMessages(remoteMessages)
+        await saveSessionMessages(session.session_id, remoteMessages)
       } catch (e) {
-        if (alive) setLocalError(e.message)
+        if (alive && showedCached) {
+          setLocalError('暂时没连上云端，已显示本机缓存的对话')
+        } else if (alive) {
+          setLocalError(e.message)
+        }
       } finally {
         if (alive) setLoading(false)
       }
