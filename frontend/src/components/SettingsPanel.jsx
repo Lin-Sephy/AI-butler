@@ -15,6 +15,7 @@ import { useConfirm } from '../contexts/ConfirmContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
 import { useChat } from '../contexts/ChatContext.jsx'
 import { recordSessionNote } from '../lib/chatApi.js'
+import { initLocalDb, getSetting, setSetting } from '../lib/localDb.js'
 import PersonaPresets from './PersonaPresets.jsx'
 import LlmConfig from './LlmConfig.jsx'
 import ErrorBanner from './ErrorBanner.jsx'
@@ -29,8 +30,8 @@ export default function SettingsPanel({ onClose }) {
   const [routine, setRoutine] = useState('')
   const [userMemo, setUserMemo] = useState('')
 
-  // 初始值快照，用于 dirty 检查
-  const originalRef = useRef({ name: '', persona: '', routine: '', userMemo: '' })
+  // 初始值快照，用于 dirty 检查；savedRef 表示上次已保存/缓存的值
+  const savedRef = useRef({ name: '', persona: '', routine: '', userMemo: '' })
 
   // max_length（从各 API 读）
   const [personaMax, setPersonaMax] = useState(1000)
@@ -53,29 +54,89 @@ export default function SettingsPanel({ onClose }) {
     setLoading(true)
     setLoadError(null)
     try {
+      await initLocalDb()
+
+      // 1) 先从本地缓存读并显示（无论是否存在）
+      try {
+        const companionRec = await getSetting('companion')
+        const routineRec = await getSetting('daily_routine')
+        const userMemoRec = await getSetting('user_memo')
+        const aiMemoRec = await getSetting('ai_memo')
+
+        const cachedCompanion = companionRec?.value || {}
+        const cachedRoutine = routineRec?.value || {}
+        const cachedUserMemo = userMemoRec?.value || {}
+        const cachedAiMemo = aiMemoRec?.value || {}
+
+        const cachedName = cachedCompanion.name || ''
+        const cachedPersona = cachedCompanion.custom_persona || ''
+        setName(cachedName)
+        setCompanionName(cachedName)
+        setPersona(cachedPersona)
+        setPersonaMax(cachedCompanion.max_persona_length ?? 1000)
+
+        setRoutine(cachedRoutine.routine || '')
+        setRoutineMax(cachedRoutine.max_length ?? 500)
+
+        setUserMemo(cachedUserMemo.content || '')
+        setMemoMax(cachedUserMemo.max_length ?? 2000)
+
+        setAiMemo(cachedAiMemo.content || '')
+
+        savedRef.current = {
+          name: cachedName,
+          persona: cachedPersona,
+          routine: cachedRoutine.routine || '',
+          userMemo: cachedUserMemo.content || '',
+        }
+      } catch (e) {
+        // 本地缓存读失败不致命，继续拉后端
+        console.warn('读取本地缓存失败', e)
+      }
+
+      // 2) 后台并行拉取后端最新，并做字段级合并
       const [companion, routineData, memoData, aiMemoData] = await Promise.all([
         apiFetch('/api/profile/companion'),
         apiFetch('/api/profile/daily_routine'),
         apiFetch('/api/memo/user'),
         apiFetch('/api/memo/ai'),
       ])
-      const companionName = companion.name || ''
-      setName(companionName)
-      setCompanionName(companionName)
-      setPersona(companion.custom_persona || '')
-      setPersonaMax(companion.max_persona_length ?? 1000)
 
-      setRoutine(routineData.routine || '')
+      const companionName = companion.name || ''
+      const backendPersona = companion.custom_persona || ''
+      const backendPersonaMax = companion.max_persona_length ?? 1000
+
+      // 字段级合并：只有当用户没有在编辑（draft === saved）时才覆盖 draft
+      if (name === savedRef.current.name) {
+        setName(companionName)
+        setCompanionName(companionName)
+      }
+      if (persona === savedRef.current.persona) setPersona(backendPersona)
+      setPersonaMax(backendPersonaMax)
+
+      if (routine === savedRef.current.routine) setRoutine(routineData.routine || '')
       setRoutineMax(routineData.max_length ?? 500)
 
-      setUserMemo(memoData.content || '')
+      if (userMemo === savedRef.current.userMemo) setUserMemo(memoData.content || '')
       setMemoMax(memoData.max_length ?? 2000)
 
+      // AI 记忆展示：非编辑区，直接更新
       setAiMemo(aiMemoData.content || '')
 
-      originalRef.current = {
+      // 更新本地缓存为后端权威值（覆盖本地缓存）
+      try {
+        await setSetting('companion', { name: companionName, custom_persona: backendPersona, max_persona_length: backendPersonaMax })
+        await setSetting('daily_routine', { routine: routineData.routine || '', max_length: routineData.max_length ?? 500 })
+        await setSetting('user_memo', { content: memoData.content || '', max_length: memoData.max_length ?? 2000 })
+        await setSetting('ai_memo', { content: aiMemoData.content || '' })
+      } catch (e) {
+        console.warn('写本地缓存失败', e)
+      }
+
+      // 更新 savedRef 快照（已保存/后端值）
+      savedRef.current = {
         name: companionName,
-        persona: companion.custom_persona || '',
+        persona: backendPersona,
         routine: routineData.routine || '',
         userMemo: memoData.content || '',
       }
@@ -90,7 +151,7 @@ export default function SettingsPanel({ onClose }) {
 
   // ─── dirty 判断 ───
   function isDirty() {
-    const o = originalRef.current
+    const o = savedRef.current
     return name !== o.name || persona !== o.persona
         || routine !== o.routine || userMemo !== o.userMemo
   }
@@ -109,7 +170,17 @@ export default function SettingsPanel({ onClose }) {
     setSaving(true)
     setSaveError(null)
 
-    const o = originalRef.current
+    const o = savedRef.current
+
+    // 先把草稿写到本地缓存，保护用户输入
+    try {
+      await setSetting('companion', { name, custom_persona: persona, max_persona_length: personaMax })
+      await setSetting('daily_routine', { routine, max_length: routineMax })
+      await setSetting('user_memo', { content: userMemo, max_length: memoMax })
+    } catch (e) {
+      console.warn('写本地缓存失败', e)
+    }
+
     const jobs = []  // { label, promise, apply }
 
     // companion 有 name 和 custom_persona 两字段，一次 PUT 传改动过的
@@ -122,15 +193,16 @@ export default function SettingsPanel({ onClose }) {
         promise: apiFetch('/api/profile/companion', { method: 'PUT', body: companionPatch }),
         apply: snap => {
           const oldName = snap.name || '小白'
-          snap.name = name
-          snap.persona = persona
+          // apply 使用后端返回值为准，但也保留用户输入的语义
+          snap.name = companionPatch.name ?? snap.name
+          snap.persona = companionPatch.custom_persona ?? snap.persona
           if (Object.prototype.hasOwnProperty.call(companionPatch, 'name')) {
-            setCompanionName(name)
+            setCompanionName(companionPatch.name)
             if (sessionId) {
               recordSessionNote({
                 sessionId,
                 mode: 'chat',
-                content: `用户把跟宠名字从「${oldName}」改成了「${name}」。以后请用「${name}」自称或回应相关称呼。`,
+                content: `用户把跟宠名字从「${oldName}」改成了「${companionPatch.name}」。以后请用「${companionPatch.name}」自称或回应相关称呼。`,
               }).catch(e => {
                 showToast(`名字已保存，但没有通知到跟宠：${e.message}`)
               })
@@ -162,7 +234,17 @@ export default function SettingsPanel({ onClose }) {
       if (r.status === 'fulfilled') jobs[i].apply(nextSnap)
       else failed.push({ label: jobs[i].label, reason: r.reason?.message })
     })
-    originalRef.current = nextSnap
+
+    // 更新本地缓存为后端权威（或用户已写入的值）
+    try {
+      await setSetting('companion', { name: nextSnap.name, custom_persona: nextSnap.persona, max_persona_length: personaMax })
+      await setSetting('daily_routine', { routine: nextSnap.routine, max_length: routineMax })
+      await setSetting('user_memo', { content: nextSnap.userMemo, max_length: memoMax })
+    } catch (e) {
+      console.warn('写本地缓存失败', e)
+    }
+
+    savedRef.current = nextSnap
 
     if (failed.length === 0) {
       setSavedHint(true)
@@ -184,6 +266,7 @@ export default function SettingsPanel({ onClose }) {
     try {
       await apiFetch('/api/memo/ai', { method: 'DELETE' })
       setAiMemo('')
+      try { await setSetting('ai_memo', { content: '' }) } catch (e) { console.warn('更新本地 ai_memo 失败', e) }
     } catch (e) {
       showToast(`清空失败：${e.message}`)
     } finally {
