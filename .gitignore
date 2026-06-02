@@ -1,4 +1,9 @@
 .env
+workers-api/.dev.vars
+workers-api/.wrangler/
+workers-api/.wrangler-config/
+workers-api/.wrangler-dev.*
+workers-api/node_modules/
 .streamlit/secrets.toml
 __pycache__/
 *.pyc
