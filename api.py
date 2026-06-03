@@ -114,7 +114,11 @@ class DailyRoutineRequest(BaseModel):
 
 
 class TaskActionRequest(BaseModel):
-    task_id: int
+    task_id: int | None = None
+    pause_started_at: str | None = None
+    resumed_at: str | None = None
+    paused_ms: int | None = None
+    base_started_at: str | None = None
 
 
 class RecordTaskRequest(BaseModel):
@@ -300,16 +304,32 @@ def pause(task_id: int, user_id: str = Depends(get_current_user_id)):
 
 
 @app.post("/api/task/{task_id}/resume")
-def resume(task_id: int, user_id: str = Depends(get_current_user_id)):
+def resume(task_id: int, req: TaskActionRequest | None = None,
+           user_id: str = Depends(get_current_user_id)):
     """继续任务。"""
-    task = resume_task(user_id, task_id)
+    task = resume_task(
+        user_id,
+        task_id,
+        pause_started_at=req.pause_started_at if req else None,
+        resumed_at=req.resumed_at if req else None,
+        paused_ms=req.paused_ms if req else None,
+        base_started_at=req.base_started_at if req else None,
+    )
     return {"message": f"继续「{task.get('keyword', '')}」！", "task": task}
 
 
 @app.post("/api/task/{task_id}/complete")
-def complete(task_id: int, user_id: str = Depends(get_current_user_id)):
+def complete(task_id: int, req: TaskActionRequest | None = None,
+             user_id: str = Depends(get_current_user_id)):
     """完成任务。"""
-    task = complete_task(user_id, task_id)
+    task = complete_task(
+        user_id,
+        task_id,
+        pause_started_at=req.pause_started_at if req else None,
+        resumed_at=req.resumed_at if req else None,
+        paused_ms=req.paused_ms if req else None,
+        base_started_at=req.base_started_at if req else None,
+    )
     save_action_log(user_id, recommendation=task.get("keyword", ""), user_action="complete")
     return {"message": f"「{task.get('keyword', '')}」完成了！", "task": task}
 

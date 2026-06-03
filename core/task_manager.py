@@ -82,17 +82,49 @@ def pause_task(user_id: str, task_id: int) -> dict:
     return _get_task_by_id(user_id, task_id)
 
 
-def resume_task(user_id: str, task_id: int) -> dict:
-    """继续任务：paused → executing。"""
+def resume_task(user_id: str, task_id: int, pause_started_at: str | None = None,
+                resumed_at: str | None = None,
+                paused_ms: int | None = None,
+                base_started_at: str | None = None) -> dict:
+    """继续任务：paused → executing。
+
+    前端专注遮罩会先本地暂停，再后台同步。resume 可携带本地暂停区间；
+    如果 pause 请求曾失败，后端也能在 resume 时扣掉这段暂停时间。
+    """
+    task = _get_task_by_id(user_id, task_id)
+    if not task or task.get("status") not in ("paused", "executing"):
+        return task
+
+    updates = {"status": "executing", "paused_at": None}
+    started = _parse_task_datetime(task.get("started_at"))
+    delta = _client_pause_delta(
+        task,
+        pause_started_at=pause_started_at,
+        resumed_at=resumed_at,
+        paused_ms=paused_ms,
+        base_started_at=base_started_at,
+    )
+
+    if delta is None and task.get("status") == "paused":
+        paused_at = _parse_task_datetime(task.get("paused_at"))
+        now = now_cn()
+        if started and paused_at and now > paused_at:
+            delta = now - paused_at
+
+    if started and delta and delta.total_seconds() > 0:
+        updates["started_at"] = (started + delta).isoformat()
+
     _patch("task", {
         "id": f"eq.{task_id}",
         "user_id": f"eq.{user_id}",
-        "status": "eq.paused",
-    }, {"status": "executing", "paused_at": None}, return_row=False)
+    }, updates, return_row=False)
     return _get_task_by_id(user_id, task_id)
 
 
-def complete_task(user_id: str, task_id: int) -> dict:
+def complete_task(user_id: str, task_id: int, pause_started_at: str | None = None,
+                  resumed_at: str | None = None,
+                  paused_ms: int | None = None,
+                  base_started_at: str | None = None) -> dict:
     """完成任务：executing/paused → completed。用实际用时覆盖 default_minutes。"""
     now = now_cn()
     task = _get_task_by_id(user_id, task_id)
@@ -103,8 +135,23 @@ def complete_task(user_id: str, task_id: int) -> dict:
             dt = _parse_task_datetime(started)
             if dt is None:
                 raise ValueError("invalid started_at")
+            delta = _client_pause_delta(
+                task,
+                pause_started_at=pause_started_at,
+                resumed_at=resumed_at,
+                paused_ms=paused_ms,
+                base_started_at=base_started_at,
+            )
+            if delta and delta.total_seconds() > 0:
+                dt = dt + delta
+                updates["started_at"] = dt.isoformat()
+            end_dt = now
+            if task.get("status") == "paused":
+                paused_at = _parse_task_datetime(task.get("paused_at"))
+                if paused_at and not delta:
+                    end_dt = paused_at
             cap = int(task.get("default_minutes") or MAX_OPEN_FOCUS_MINUTES)
-            actual = max(1, min(cap, round((now - dt).total_seconds() / 60)))
+            actual = max(1, min(cap, round((end_dt - dt).total_seconds() / 60)))
             updates["default_minutes"] = actual
         except (ValueError, TypeError):
             pass
@@ -169,6 +216,34 @@ def _parse_task_datetime(value: str | None):
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return None
+
+
+def _same_task_instant(left: str | None, right: str | None) -> bool:
+    left_dt = _parse_task_datetime(left)
+    right_dt = _parse_task_datetime(right)
+    return bool(left_dt and right_dt and left_dt == right_dt)
+
+
+def _client_pause_delta(task: dict, pause_started_at: str | None = None,
+                        resumed_at: str | None = None,
+                        paused_ms: int | None = None,
+                        base_started_at: str | None = None) -> timedelta | None:
+    """Return a client-reported pause delta, guarded against double-apply."""
+    if base_started_at and not _same_task_instant(task.get("started_at"), base_started_at):
+        return None
+
+    start = _parse_task_datetime(pause_started_at)
+    end = _parse_task_datetime(resumed_at)
+    if start and end and end > start:
+        return end - start
+
+    try:
+        ms = int(paused_ms) if paused_ms is not None else 0
+    except (TypeError, ValueError):
+        ms = 0
+    if ms > 0:
+        return timedelta(milliseconds=ms)
+    return None
 
 
 def _sweep_finished_focus_tasks(user_id: str) -> None:

@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 
-export default function FocusOverlay({ task, onComplete, onAbandon }) {
+export default function FocusOverlay({ task, onPause, onResume, onComplete, onAbandon }) {
   const initialStartTime = parseTaskTime(task.started_at) || Date.now()
   const initialElapsed = Math.max(0, Math.floor((Date.now() - initialStartTime) / 1000))
   const [elapsed, setElapsed] = useState(initialElapsed)
   const [paused, setPaused] = useState(false)
   const [tooShortHint, setTooShortHint] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [syncHint, setSyncHint] = useState('')
   const intervalRef = useRef(null)
   const submittingRef = useRef(false)
   // 以 Date.now() 为基准，避免 tab 不可见时 setInterval 被浏览器节流导致秒数丢失
@@ -18,11 +19,22 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
   const isCountdown = !!task.default_minutes
   const remaining = Math.max(0, totalSeconds - elapsed)
 
-  function currentElapsedSeconds() {
+  function currentElapsedSeconds(now = Date.now()) {
     if (paused && pauseStartRef.current !== null) {
       return Math.floor((pauseStartRef.current - startTimeRef.current - pausedAccumRef.current) / 1000)
     }
-    return Math.floor((Date.now() - startTimeRef.current - pausedAccumRef.current) / 1000)
+    return Math.floor((now - startTimeRef.current - pausedAccumRef.current) / 1000)
+  }
+
+  function buildPausePayload(now = Date.now()) {
+    const pauseStartedAt = pauseStartRef.current
+    if (!paused || !pauseStartedAt) return {}
+    return {
+      pause_started_at: new Date(pauseStartedAt).toISOString(),
+      resumed_at: new Date(now).toISOString(),
+      paused_ms: Math.max(0, now - pauseStartedAt),
+      base_started_at: new Date(startTimeRef.current).toISOString(),
+    }
   }
 
   async function submit(action) {
@@ -31,7 +43,7 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
     setSubmitting(true)
     try {
       if (action === 'complete') {
-        await onComplete(task.id)
+        await onComplete(task.id, buildPausePayload())
       } else {
         await onAbandon(task.id)
       }
@@ -52,15 +64,45 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
     submit('complete')
   }
 
-  // 暂停状态切换时维护累计暂停时长
-  useEffect(() => {
-    if (paused) {
-      pauseStartRef.current = Date.now()
-    } else if (pauseStartRef.current !== null) {
-      pausedAccumRef.current += Date.now() - pauseStartRef.current
-      pauseStartRef.current = null
+  function applyServerTask(serverTask) {
+    const ms = parseTaskTime(serverTask?.started_at)
+    if (!ms) return
+    startTimeRef.current = ms
+    pausedAccumRef.current = 0
+    pauseStartRef.current = null
+    setElapsed(Math.max(0, Math.floor((Date.now() - ms) / 1000)))
+  }
+
+  function handlePauseToggle() {
+    if (submitting) return
+    const now = Date.now()
+    setSyncHint('')
+
+    if (!paused) {
+      setElapsed(currentElapsedSeconds(now))
+      pauseStartRef.current = now
+      setPaused(true)
+      Promise.resolve(onPause?.(task.id))
+        .catch(() => {
+          setSyncHint('已先暂停，稍后同步')
+        })
+      return
     }
-  }, [paused])
+
+    const pauseStartedAt = pauseStartRef.current
+    const payload = buildPausePayload(now)
+    const pausedMs = payload.paused_ms || 0
+    if (pauseStartedAt) pausedAccumRef.current += pausedMs
+    pauseStartRef.current = null
+    setPaused(false)
+    setElapsed(currentElapsedSeconds(now))
+
+    Promise.resolve(onResume?.(task.id, payload))
+      .then(applyServerTask)
+      .catch(() => {
+        setSyncHint('继续计时中，稍后同步')
+      })
+  }
 
   useEffect(() => {
     function recompute() {
@@ -148,7 +190,7 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
       {/* 控制按钮 */}
       <div style={{ display: 'flex', gap: 16 }}>
         <button
-          onClick={() => setPaused(!paused)}
+          onClick={handlePauseToggle}
           disabled={submitting}
           style={{
             padding: '12px 28px', borderRadius: 'var(--radius)',
@@ -193,6 +235,16 @@ export default function FocusOverlay({ task, onComplete, onAbandon }) {
           放弃
         </button>
       </div>
+
+      {syncHint && (
+        <div style={{
+          fontSize: 12,
+          color: 'var(--color-subtle)',
+          marginTop: 16,
+        }}>
+          {syncHint}
+        </div>
+      )}
 
       {/* 桌宠占位（第 3 步做真 SVG 白鼬） */}
       <div style={{

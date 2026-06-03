@@ -55,9 +55,12 @@ export default function TasksPage() {
     }
   }, [tasks])
 
-  async function handleAction(action, taskId) {
+  async function handleAction(action, taskId, payload) {
     try {
-      const res = await apiFetch(`/api/task/${taskId}/${action}`, { method: 'POST' })
+      const res = await apiFetch(`/api/task/${taskId}/${action}`, {
+        method: 'POST',
+        body: payload || undefined,
+      })
       if (action === 'start') {
         // POST 返回的 task 已是 executing，直接进 FocusOverlay，不再重查一次
         if (res?.task?.status === 'executing') setFocusTask(res.task)
@@ -70,6 +73,31 @@ export default function TasksPage() {
     } catch (e) {
       showToast(e.message)
     }
+  }
+
+  async function handleFocusPause(taskId) {
+    const res = await apiFetch(`/api/task/${taskId}/pause`, { method: 'POST' })
+    if (res?.task) {
+      setTasks(prev => prev.map(t => t.id === taskId ? res.task : t))
+      setFocusTask(res.task)
+    }
+    return res?.task
+  }
+
+  async function handleFocusResume(taskId, payload) {
+    const res = await apiFetch(`/api/task/${taskId}/resume`, {
+      method: 'POST',
+      body: payload || {},
+    })
+    if (res?.task) {
+      setTasks(prev => prev.map(t => t.id === taskId ? res.task : t))
+      setFocusTask(res.task)
+    }
+    return res?.task
+  }
+
+  async function handleFocusComplete(taskId, payload) {
+    return handleAction('complete', taskId, payload)
   }
 
   async function handleDelete(taskId) {
@@ -145,7 +173,9 @@ export default function TasksPage() {
       {focusTask && (
         <FocusOverlay
           task={focusTask}
-          onComplete={id => handleAction('complete', id)}
+          onPause={handleFocusPause}
+          onResume={handleFocusResume}
+          onComplete={handleFocusComplete}
           onAbandon={id => handleAction('abandon', id)}
         />
       )}

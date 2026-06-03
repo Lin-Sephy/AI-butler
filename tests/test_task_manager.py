@@ -8,6 +8,7 @@ from core.task_manager import (
     _sweep_finished_focus_tasks,
     _task_day_start,
     complete_task,
+    resume_task,
 )
 
 CN_TZ = timezone(timedelta(hours=8))
@@ -111,3 +112,74 @@ def test_complete_task_caps_long_open_timer():
 
     patch_task.assert_called_once()
     assert patch_task.call_args.args[2]["default_minutes"] == MAX_OPEN_FOCUS_MINUTES
+
+
+def test_resume_task_applies_client_pause_delta():
+    task = {
+        "id": 1,
+        "user_id": "user-1",
+        "status": "executing",
+        "started_at": "2026-05-15T10:00:00+08:00",
+        "paused_at": None,
+    }
+
+    with patch("core.task_manager._get", side_effect=[[task], [{**task, "started_at": "2026-05-15T10:10:00+08:00"}]]), \
+         patch("core.task_manager._patch") as patch_task:
+        resume_task(
+            "user-1",
+            1,
+            pause_started_at="2026-05-15T10:20:00+08:00",
+            resumed_at="2026-05-15T10:30:00+08:00",
+            paused_ms=600000,
+            base_started_at="2026-05-15T10:00:00+08:00",
+        )
+
+    patch_task.assert_called_once()
+    assert patch_task.call_args.args[2]["started_at"] == "2026-05-15T10:10:00+08:00"
+    assert patch_task.call_args.args[2]["status"] == "executing"
+    assert patch_task.call_args.args[2]["paused_at"] is None
+
+
+def test_resume_task_ignores_client_pause_delta_when_base_changed():
+    task = {
+        "id": 1,
+        "user_id": "user-1",
+        "status": "executing",
+        "started_at": "2026-05-15T10:10:00+08:00",
+        "paused_at": None,
+    }
+
+    with patch("core.task_manager._get", side_effect=[[task], [task]]), \
+         patch("core.task_manager._patch") as patch_task:
+        resume_task(
+            "user-1",
+            1,
+            pause_started_at="2026-05-15T10:20:00+08:00",
+            resumed_at="2026-05-15T10:30:00+08:00",
+            paused_ms=600000,
+            base_started_at="2026-05-15T10:00:00+08:00",
+        )
+
+    patch_task.assert_called_once()
+    assert "started_at" not in patch_task.call_args.args[2]
+
+
+def test_complete_paused_task_uses_paused_at_for_actual_minutes():
+    now = datetime(2026, 5, 15, 10, 40, tzinfo=CN_TZ)
+    task = {
+        "id": 1,
+        "user_id": "user-1",
+        "status": "paused",
+        "started_at": "2026-05-15T10:00:00+08:00",
+        "paused_at": "2026-05-15T10:25:00+08:00",
+        "default_minutes": 60,
+    }
+
+    with patch("core.task_manager.now_cn", return_value=now), \
+         patch("core.task_manager._get", side_effect=[[task], [{**task, "status": "completed"}]]), \
+         patch("core.task_manager._patch") as patch_task:
+        complete_task("user-1", 1)
+
+    patch_task.assert_called_once()
+    assert patch_task.call_args.args[2]["completed_at"] == "2026-05-15T10:40:00+08:00"
+    assert patch_task.call_args.args[2]["default_minutes"] == 25
