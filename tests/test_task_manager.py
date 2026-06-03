@@ -5,9 +5,11 @@ from unittest.mock import patch
 
 from core.task_manager import (
     MAX_OPEN_FOCUS_MINUTES,
+    _sweep_expired_scheduled_tasks,
     _sweep_finished_focus_tasks,
     _task_day_start,
     complete_task,
+    get_today_tasks,
     resume_task,
 )
 
@@ -24,6 +26,48 @@ def test_task_day_at_4am_starts_new_day():
     now = datetime(2026, 5, 15, 4, 0, tzinfo=CN_TZ)
 
     assert _task_day_start(now) == datetime(2026, 5, 15, 4, 0, tzinfo=CN_TZ)
+
+
+def test_sweep_expired_scheduled_tasks_abandons_previous_task_day():
+    now = datetime(2026, 5, 16, 4, 0, tzinfo=CN_TZ)
+
+    with patch("core.task_manager.now_cn", return_value=now), \
+         patch("core.task_manager._patch") as patch_task:
+        _sweep_expired_scheduled_tasks("user-1")
+
+    patch_task.assert_called_once()
+    filters = patch_task.call_args.args[1]
+    updates = patch_task.call_args.args[2]
+    assert filters["status"] == "in.(idle,scheduled)"
+    assert filters["scheduled_at"] == "lt.2026-05-16T04:00:00+08:00"
+    assert updates["status"] == "abandoned"
+    assert updates["completed_at"] == "2026-05-16T04:00:00+08:00"
+
+
+def test_get_today_tasks_keeps_old_unscheduled_idle_visible():
+    now = datetime(2026, 5, 16, 10, 0, tzinfo=CN_TZ)
+    old_idle = {
+        "id": 9,
+        "user_id": "user-1",
+        "status": "idle",
+        "keyword": "旧普通待办",
+        "scheduled_at": None,
+        "created_at": "2026-05-14T10:00:00+08:00",
+    }
+
+    with patch("core.task_manager.now_cn", return_value=now), \
+         patch("core.task_manager._sweep_expired_scheduled_tasks"), \
+         patch("core.task_manager._sweep_finished_focus_tasks"), \
+         patch("core.task_manager._get", side_effect=[
+             [],          # active created today
+             [],          # scheduled today
+             [old_idle],  # unscheduled idle backlog
+             [],          # executing/paused carry-over
+             [],          # recent abandoned
+         ]):
+        tasks = get_today_tasks("user-1")
+
+    assert tasks == [old_idle]
 
 
 def test_sweep_finished_focus_tasks_completes_expired_countdown():

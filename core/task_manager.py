@@ -8,11 +8,6 @@ v2 多用户改造（2026-04-15）：所有公开函数第一个参数都是 use
 from datetime import datetime, timedelta
 from db.database import _get, _post, _patch, _delete, now_cn
 
-# idle 任务留存天数：超过就自动结转为 abandoned
-# 2026-04-23: 从 2 改 1——避免"数据库有但前端看不见"的僵尸态（前端只看 today，
-# idle 第 2 天就是这种僵尸态）。现在一过当天 idle 就转 abandoned，
-# abandoned 进前端"已放弃"折叠区（2 天内可恢复）
-STALE_IDLE_DAYS = 1
 TASK_DAY_START_HOUR = 4
 MAX_OPEN_FOCUS_MINUTES = 8 * 60
 
@@ -192,18 +187,18 @@ def update_task_keyword(user_id: str, task_id: int, keyword: str) -> dict:
     return _get_task_by_id(user_id, task_id)
 
 
-def _sweep_stale_idle_tasks(user_id: str) -> None:
-    """把超过 STALE_IDLE_DAYS 天前创建仍在 idle 的任务结转为 abandoned。
+def _sweep_expired_scheduled_tasks(user_id: str) -> None:
+    """把所属任务日已经结束的未开始预定任务结转为 abandoned。
 
     静默失败——sweep 不该影响主流程，网络/DB 抖动时下次再 sweep 即可。
     """
     now = now_cn()
-    cutoff = (_task_day_start(now) - timedelta(days=STALE_IDLE_DAYS)).isoformat()
+    today_start = _task_day_start(now).isoformat()
     try:
         _patch("task", {
             "user_id": f"eq.{user_id}",
-            "status": "eq.idle",
-            "created_at": f"lt.{cutoff}",
+            "status": "in.(idle,scheduled)",
+            "scheduled_at": f"lt.{today_start}",
         }, {"status": "abandoned", "completed_at": now.isoformat()}, return_row=False)
     except Exception:
         pass
@@ -286,14 +281,15 @@ def _sweep_finished_focus_tasks(user_id: str) -> None:
 
 def get_today_tasks(user_id: str) -> list[dict]:
     """获取今日任务视图：活跃任务（今天 created_at 且非 abandoned）
+    + 所有未完成的普通待办（无 scheduled_at 的 idle）
     + 跨天仍在执行/暂停的任务
     + 最近 2 天 abandoned 任务（供前端"已放弃"折叠区 + 恢复按钮）。
 
-    读前先 sweep 一次陈年 idle——超过 STALE_IDLE_DAYS 的 idle 自动结转 abandoned。
+    读前先 sweep 一次过期预定任务；普通 idle 不再自动结转。
     """
     from db.database import ABANDONED_RETENTION_DAYS
 
-    _sweep_stale_idle_tasks(user_id)
+    _sweep_expired_scheduled_tasks(user_id)
     _sweep_finished_focus_tasks(user_id)
     now = now_cn()
     today_start_dt, today_end_dt = _task_day_window(now)
@@ -327,6 +323,19 @@ def get_today_tasks(user_id: str) -> list[dict]:
             active.append(t)
             seen.add(t["id"])
 
+    # 普通待办没有过期语义：昨天没做完，今天仍然应该留在任务页。
+    unscheduled_idle = _get("task", {
+        "user_id": f"eq.{user_id}",
+        "scheduled_at": "is.null",
+        "status": "eq.idle",
+        "select": "*",
+        "order": "created_at.desc",
+    })
+    for t in unscheduled_idle:
+        if t["id"] not in seen:
+            active.append(t)
+            seen.add(t["id"])
+
     # 跨天仍在执行/暂停的任务也必须出现在任务页。
     # 否则后端 start_task 会因为已有 executing 拦截，前端却看不到那条任务，用户无法处理。
     carried_active = _get("task", {
@@ -355,8 +364,8 @@ def get_today_tasks(user_id: str) -> list[dict]:
 def restore_task(user_id: str, task_id: int) -> dict | None:
     """把 abandoned 任务恢复成 idle，重置 created_at = now。
 
-    不重置 created_at 会立刻又被 sweep 打回 abandoned（因为原 created_at 已超
-    STALE_IDLE_DAYS）。重置相当于"用户今天想重新开始做这件事"。
+    恢复后清掉 scheduled_at，避免过期预定任务刚恢复又被 sweep 打回 abandoned。
+    这相当于"用户今天想重新开始做这件事"。
     """
     task = _get_task_by_id(user_id, task_id)
     if not task or task.get("status") != "abandoned":
@@ -369,6 +378,7 @@ def restore_task(user_id: str, task_id: int) -> dict | None:
     }, {
         "status": "idle",
         "created_at": now_iso,
+        "scheduled_at": None,
         "completed_at": None,
     }, return_row=True)
 
