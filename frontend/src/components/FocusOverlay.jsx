@@ -12,6 +12,7 @@ export default function FocusOverlay({ task, onPause, onResume, onComplete, onAb
   const submittingRef = useRef(false)
   // 以 Date.now() 为基准，避免 tab 不可见时 setInterval 被浏览器节流导致秒数丢失
   const startTimeRef = useRef(initialStartTime)
+  const serverStartTimeRef = useRef(initialStartTime)
   const pausedAccumRef = useRef(0) // 累计暂停毫秒
   const pauseStartRef = useRef(null) // 当前暂停段起点，未暂停时为 null
 
@@ -21,9 +22,9 @@ export default function FocusOverlay({ task, onPause, onResume, onComplete, onAb
 
   function currentElapsedSeconds(now = Date.now()) {
     if (paused && pauseStartRef.current !== null) {
-      return Math.floor((pauseStartRef.current - startTimeRef.current - pausedAccumRef.current) / 1000)
+      return Math.max(0, Math.floor((pauseStartRef.current - startTimeRef.current - pausedAccumRef.current) / 1000))
     }
-    return Math.floor((now - startTimeRef.current - pausedAccumRef.current) / 1000)
+    return Math.max(0, Math.floor((now - startTimeRef.current - pausedAccumRef.current) / 1000))
   }
 
   function buildPausePayload(now = Date.now()) {
@@ -33,9 +34,14 @@ export default function FocusOverlay({ task, onPause, onResume, onComplete, onAb
       pause_started_at: new Date(pauseStartedAt).toISOString(),
       resumed_at: new Date(now).toISOString(),
       paused_ms: Math.max(0, now - pauseStartedAt),
-      base_started_at: new Date(startTimeRef.current).toISOString(),
+      base_started_at: new Date(serverStartTimeRef.current).toISOString(),
     }
   }
+
+  useEffect(() => {
+    const ms = parseTaskTime(task.started_at)
+    if (ms) serverStartTimeRef.current = ms
+  }, [task.id, task.started_at])
 
   async function submit(action) {
     if (submittingRef.current) return
@@ -64,13 +70,10 @@ export default function FocusOverlay({ task, onPause, onResume, onComplete, onAb
     submit('complete')
   }
 
-  function applyServerTask(serverTask) {
+  function rememberServerTask(serverTask) {
     const ms = parseTaskTime(serverTask?.started_at)
     if (!ms) return
-    startTimeRef.current = ms
-    pausedAccumRef.current = 0
-    pauseStartRef.current = null
-    setElapsed(Math.max(0, Math.floor((Date.now() - ms) / 1000)))
+    serverStartTimeRef.current = ms
   }
 
   function handlePauseToggle() {
@@ -98,7 +101,7 @@ export default function FocusOverlay({ task, onPause, onResume, onComplete, onAb
     setElapsed(currentElapsedSeconds(now))
 
     Promise.resolve(onResume?.(task.id, payload))
-      .then(applyServerTask)
+      .then(rememberServerTask)
       .catch(() => {
         setSyncHint('继续计时中，稍后同步')
       })
@@ -108,7 +111,7 @@ export default function FocusOverlay({ task, onPause, onResume, onComplete, onAb
     function recompute() {
       if (paused) return
       const now = Date.now()
-      setElapsed(Math.floor((now - startTimeRef.current - pausedAccumRef.current) / 1000))
+      setElapsed(currentElapsedSeconds(now))
     }
     recompute()
     intervalRef.current = setInterval(recompute, 1000)
@@ -127,7 +130,7 @@ export default function FocusOverlay({ task, onPause, onResume, onComplete, onAb
     function handleVisibility() {
       if (document.hidden || paused) return
       const now = Date.now()
-      setElapsed(Math.floor((now - startTimeRef.current - pausedAccumRef.current) / 1000))
+      setElapsed(currentElapsedSeconds(now))
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)

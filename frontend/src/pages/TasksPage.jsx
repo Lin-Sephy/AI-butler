@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { apiFetch } from '../lib/api.js'
 import { useToast } from '../contexts/ToastContext.jsx'
 import TaskCard from '../components/TaskCard.jsx'
@@ -18,6 +18,7 @@ export default function TasksPage() {
   const [error, setError] = useState(null)
   const [showNewTask, setShowNewTask] = useState(false)
   const [focusTask, setFocusTask] = useState(null)
+  const focusSyncRef = useRef(Promise.resolve())
   const [completedOpen, setCompletedOpenRaw] = useState(() => readLocalBool(COMPLETED_OPEN_KEY))
   const [abandonedOpen, setAbandonedOpenRaw] = useState(() => readLocalBool(ABANDONED_OPEN_KEY))
 
@@ -55,43 +56,93 @@ export default function TasksPage() {
     }
   }, [tasks])
 
+  function queueFocusRequest(request) {
+    const next = focusSyncRef.current
+      .catch(() => {})
+      .then(request)
+    focusSyncRef.current = next
+    return next
+  }
+
   async function handleAction(action, taskId, payload) {
+    let originalStartTask = null
+    let optimisticStartTask = null
+    if (action === 'start') {
+      const currentTask = tasks.find(t => t.id === taskId)
+      if (currentTask) {
+        originalStartTask = currentTask
+        optimisticStartTask = {
+          ...currentTask,
+          status: 'executing',
+          started_at: new Date().toISOString(),
+        }
+        setFocusTask(optimisticStartTask)
+        setTasks(prev => prev.map(t => t.id === taskId ? optimisticStartTask : t))
+      }
+    } else if (action === 'complete' || action === 'abandon') {
+      setFocusTask(null)
+      setTasks(prev => prev.map(t => (
+        t.id === taskId
+          ? { ...t, status: action === 'complete' ? 'completed' : 'abandoned' }
+          : t
+      )))
+    }
+
     try {
-      const res = await apiFetch(`/api/task/${taskId}/${action}`, {
+      const request = () => apiFetch(`/api/task/${taskId}/${action}`, {
         method: 'POST',
         body: payload || undefined,
       })
+      const res = await (
+        ['start', 'complete', 'abandon'].includes(action)
+          ? queueFocusRequest(request)
+          : request()
+      )
       if (action === 'start') {
-        // POST 返回的 task 已是 executing，直接进 FocusOverlay，不再重查一次
-        if (res?.task?.status === 'executing') setFocusTask(res.task)
+        // 前端已先开 FocusOverlay；后端返回后更新任务事实，当前遮罩仍沿用本地开始时间。
+        if (res?.task?.status === 'executing') {
+          setFocusTask(res.task)
+          setTasks(prev => prev.map(t => t.id === taskId ? res.task : t))
+        }
         fetchTasks()
       } else {
-        setFocusTask(null)
-        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: action === 'complete' ? 'completed' : action === 'abandon' ? 'abandoned' : t.status } : t))
         await fetchTasks()
       }
     } catch (e) {
+      if (action === 'start') {
+        setFocusTask(null)
+        if (originalStartTask) {
+          setTasks(prev => prev.map(t => t.id === taskId ? originalStartTask : t))
+        }
+        fetchTasks()
+      } else if (action === 'complete' || action === 'abandon') {
+        fetchTasks()
+      }
       showToast(e.message)
     }
   }
 
   async function handleFocusPause(taskId) {
-    const res = await apiFetch(`/api/task/${taskId}/pause`, { method: 'POST' })
+    const res = await queueFocusRequest(
+      () => apiFetch(`/api/task/${taskId}/pause`, { method: 'POST' }),
+    )
     if (res?.task) {
       setTasks(prev => prev.map(t => t.id === taskId ? res.task : t))
-      setFocusTask(res.task)
+      if (res.task.status === 'paused') setFocusTask(res.task)
     }
     return res?.task
   }
 
   async function handleFocusResume(taskId, payload) {
-    const res = await apiFetch(`/api/task/${taskId}/resume`, {
-      method: 'POST',
-      body: payload || {},
-    })
+    const res = await queueFocusRequest(
+      () => apiFetch(`/api/task/${taskId}/resume`, {
+        method: 'POST',
+        body: payload || {},
+      }),
+    )
     if (res?.task) {
       setTasks(prev => prev.map(t => t.id === taskId ? res.task : t))
-      setFocusTask(res.task)
+      if (res.task.status === 'executing') setFocusTask(res.task)
     }
     return res?.task
   }
