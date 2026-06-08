@@ -27,12 +27,15 @@ export async function initLocalDb() {
 }
 
 function normalizeMessage(message, sessionId) {
+  const parsedTimestamp = typeof message.timestamp === 'string'
+    ? Date.parse(message.timestamp)
+    : message.timestamp
   return {
     session_id: sessionId,
     role: message.role,
     content: message.content,
     mode: message.mode || 'chat',
-    timestamp: typeof message.timestamp === 'number' ? message.timestamp : Date.now(),
+    timestamp: Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now(),
   }
 }
 

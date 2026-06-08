@@ -136,13 +136,16 @@ def build_chat_message(user_input: str,
                        user_memo: str = "",
                        ai_memo: str = "",
                        daily_memo: str = "",
-                       task_board: str = "") -> str:
+                       task_board: str = "",
+                       task_day_changed: bool = False) -> str:
     """构建聊天模式的 user message。"""
     from db.database import now_cn
     now = now_cn()
     time_str = now.strftime("%Y-%m-%d %H:%M")
     weekday = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][now.weekday()]
     parts = [f"当前时间：{time_str}，{weekday}"]
+    if task_day_changed:
+        parts.append("当然已进入新的任务日，任务已随时间发生变更。")
     if user_memo.strip():
         parts.append(f"用户手记：{user_memo.strip()}")
     if ai_memo.strip():

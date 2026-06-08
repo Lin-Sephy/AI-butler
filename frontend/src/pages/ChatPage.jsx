@@ -30,6 +30,67 @@ import { cleanAssistantText, renderAssistantText } from '../lib/text.jsx'
 const STOAT_WIDTH = 220
 const BUBBLE_MAX_LEN = 100      // 小白气泡：超过截断 + "更多"
 const USER_BUBBLE_MAX_LEN = 50  // 用户气泡：更短（防堆高度挡白鼬）
+const CHAT_TIME_ZONE = 'Asia/Shanghai'
+const TIME_DIVIDER_GAP_MS = 10 * 60 * 1000
+
+function getChatDateParts(timestamp) {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return null
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: CHAT_TIME_ZONE,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]))
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    hour: Number(values.hour) % 24,
+    minute: Number(values.minute),
+  }
+}
+
+function chatDateKey(timestamp) {
+  const parts = getChatDateParts(timestamp)
+  return parts ? `${parts.year}-${parts.month}-${parts.day}` : ''
+}
+
+function formatChatTime(timestamp) {
+  const parts = getChatDateParts(timestamp)
+  const today = getChatDateParts(Date.now())
+  if (!parts || !today) return ''
+
+  const sameDay = parts.year === today.year
+    && parts.month === today.month
+    && parts.day === today.day
+  const sameYear = parts.year === today.year
+  let period = '上午'
+  if (parts.hour < 6) period = '凌晨'
+  else if (parts.hour >= 18) period = '晚上'
+  else if (parts.hour >= 12) period = '下午'
+  const hour = parts.hour % 12 || 12
+  const time = `${period} ${hour}:${String(parts.minute).padStart(2, '0')}`
+
+  if (sameDay) return time
+  const date = `${sameYear ? '' : `${parts.year}年`}${parts.month}月${parts.day}日`
+  return `${date} ${time}`
+}
+
+function shouldShowTimeDivider(message, previousMessage) {
+  const current = new Date(message?.timestamp).getTime()
+  if (!Number.isFinite(current)) return false
+  if (!previousMessage) return true
+
+  const previous = new Date(previousMessage.timestamp).getTime()
+  if (!Number.isFinite(previous)) return true
+  return chatDateKey(current) !== chatDateKey(previous)
+    || current - previous >= TIME_DIVIDER_GAP_MS
+}
 
 // 闲聊模式下打出这些词时顺手提示切任务模式
 const PLAN_INTENT_KEYWORDS = [
@@ -492,6 +553,7 @@ function ConversationDetailView({ session, onBack, error }) {
             role: msg.role,
             content: msg.content,
             mode: msg.mode,
+            timestamp: msg.timestamp,
           })))
           setLoading(false)
         }
@@ -568,8 +630,10 @@ function ConversationDetailView({ session, onBack, error }) {
               const curMode = m.mode || 'chat'
               const prevMode = prev ? (prev.mode || 'chat') : null
               const showDivider = prev && prevMode !== curMode
+              const showTime = shouldShowTimeDivider(m, prev)
               return (
                 <Fragment key={i}>
+                  {showTime && <TimeDivider timestamp={m.timestamp} />}
                   {showDivider && <ModeDivider mode={curMode} />}
                   <ChatBubble message={m} />
                 </Fragment>
@@ -579,6 +643,23 @@ function ConversationDetailView({ session, onBack, error }) {
           <div ref={endRef} />
         </div>
       </main>
+    </div>
+  )
+}
+
+function TimeDivider({ timestamp }) {
+  const label = formatChatTime(timestamp)
+  if (!label) return null
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      margin: '6px 0 16px',
+      color: 'var(--color-subtle)',
+      fontSize: 12,
+      lineHeight: 1.4,
+    }}>
+      {label}
     </div>
   )
 }

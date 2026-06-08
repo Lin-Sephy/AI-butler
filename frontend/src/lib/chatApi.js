@@ -43,13 +43,14 @@ export async function listSessions() {
  *   created_tasks: Array<{task_id, keyword, minutes, scheduled_at, status}>,  // 本轮 DS 写入的任务
  * }>}
  */
-export async function sendMessage({ message, sessionId, mode = 'chat' }) {
+export async function sendMessage({ message, sessionId, mode = 'chat', messageTimestamp }) {
   return apiFetch('/api/chat', {
     method: 'POST',
     body: {
       message,
       session_id: sessionId,
       mode,
+      message_timestamp: messageTimestamp,
     },
   })
 }

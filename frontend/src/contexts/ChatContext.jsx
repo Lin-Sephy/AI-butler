@@ -99,6 +99,7 @@ export function ChatProvider({ children }) {
               role: msg.role,
               content: msg.content,
               mode: msg.mode,
+              timestamp: msg.timestamp,
             })))
             showedCached = true
             setLoading(false)
@@ -107,7 +108,12 @@ export function ChatProvider({ children }) {
           const data = await loadHistory(saved)
           const history = data.messages || []
           const finalHistory = history.length > 0 ? history : (
-            cached.length > 0 ? cached.map(msg => ({ role: msg.role, content: msg.content, mode: msg.mode })) : [{ role: 'assistant', content: DEFAULT_GREETING, mode: 'chat' }]
+            cached.length > 0 ? cached.map(msg => ({
+              role: msg.role,
+              content: msg.content,
+              mode: msg.mode,
+              timestamp: msg.timestamp,
+            })) : [{ role: 'assistant', content: DEFAULT_GREETING, mode: 'chat', timestamp: Date.now() }]
           )
           setMessages(finalHistory)
           if (history.length > 0) {
@@ -117,7 +123,7 @@ export function ChatProvider({ children }) {
           const { session_id, greeting } = await newSession()
           localStorage.setItem(SESSION_KEY, session_id)
           setSessionId(session_id)
-          setMessages(greeting ? [{ role: 'assistant', content: greeting, mode: 'chat' }] : [])
+          setMessages(greeting ? [{ role: 'assistant', content: greeting, mode: 'chat', timestamp: Date.now() }] : [])
         }
       } catch (e) {
         if (showedCached) {
@@ -136,12 +142,28 @@ export function ChatProvider({ children }) {
     async text => {
       if (!sessionId || !text.trim()) return
       setError(null)
-      const userMessage = { role: 'user', content: text, mode }
+      const messageTimestamp = new Date().toISOString()
+      const userMessage = {
+        role: 'user',
+        content: text,
+        mode,
+        timestamp: Date.parse(messageTimestamp),
+      }
       setMessages(m => [...m, userMessage])
       addSessionMessage(sessionId, userMessage).catch(() => {})
       try {
-        const resp = await sendMessage({ message: text, sessionId, mode })
-        const assistantMessage = { role: 'assistant', content: resp.reply, mode }
+        const resp = await sendMessage({
+          message: text,
+          sessionId,
+          mode,
+          messageTimestamp,
+        })
+        const assistantMessage = {
+          role: 'assistant',
+          content: resp.reply,
+          mode,
+          timestamp: Date.parse(resp.reply_timestamp),
+        }
         setMessages(m => [...m, assistantMessage])
         addSessionMessage(sessionId, assistantMessage).catch(() => {})
         const created = resp.created_tasks || []
@@ -177,7 +199,7 @@ export function ChatProvider({ children }) {
       const { session_id, greeting } = await newSession()
       localStorage.setItem(SESSION_KEY, session_id)
       setSessionId(session_id)
-      setMessages([{ role: 'assistant', content: greeting || DEFAULT_GREETING, mode: 'chat' }])
+      setMessages([{ role: 'assistant', content: greeting || DEFAULT_GREETING, mode: 'chat', timestamp: Date.now() }])
       setPlanConfirmed(false)
     } catch (e) {
       setError(e.message)
@@ -196,6 +218,7 @@ export function ChatProvider({ children }) {
           role: msg.role,
           content: msg.content,
           mode: msg.mode,
+          timestamp: msg.timestamp,
         })))
         setPlanConfirmed(false)
         setLastCreatedTasks([])

@@ -115,7 +115,8 @@ def call_chat(user_input: str,
               custom_persona: str = "",
               mode: str = "chat",
               user_id: str | None = None,
-              user_llm: dict | None = None) -> dict:
+              user_llm: dict | None = None,
+              task_day_changed: bool = False) -> dict:
     """聊天调用。
 
     mode="chat"：闲聊模式，不注册工具，纯文本输出
@@ -151,6 +152,7 @@ def call_chat(user_input: str,
             user_input,
             user_memo=user_memo, ai_memo=ai_memo,
             daily_memo=daily_memo, task_board=task_board,
+            task_day_changed=task_day_changed,
         )
 
         messages: list[dict] = [{"role": "system", "content": system_prompt}]

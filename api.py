@@ -9,6 +9,7 @@ v2 多用户改造（2026-04-15）：
 import logging
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -83,10 +84,12 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str
     mode: str = "chat"  # "chat" | "plan"
+    message_timestamp: str | None = None
 
 
 class ChatResponse(BaseModel):
     reply: str
+    reply_timestamp: str
     confirmed: bool = False  # v5 计划模式：DS 是否判定用户已定稿
     created_tasks: list[dict] = []  # v5 计划模式：本轮 create_tasks 工具写入的任务，前端弹窗用
     pending_deletes: list[dict] = []  # v5 计划模式：本轮 delete_task(s) 待确认删除，前端弹窗用
@@ -152,6 +155,28 @@ class CompanionUpdateRequest(BaseModel):
 
 # ---------- 辅助函数 ----------
 
+_CN_TZ = timezone(timedelta(hours=8))
+
+
+def _parse_message_time(value: str | None) -> datetime:
+    if value:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=_CN_TZ)
+            return parsed.astimezone(_CN_TZ)
+        except (TypeError, ValueError):
+            pass
+    return now_cn()
+
+
+def _task_day_date(value: str | None):
+    current = _parse_message_time(value)
+    if current.hour < 4:
+        current -= timedelta(days=1)
+    return current.date()
+
+
 def _build_task_board_text(user_id: str) -> str:
     """构建任务栏文本，传给 DS 聊天时参考。"""
     tasks = get_today_tasks(user_id)
@@ -184,9 +209,14 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     计划模式：DS 注册 function calling 工具，可能输出 ---judgment---{"confirmed": true}。
     """
     mode = req.mode if req.mode in ("chat", "plan") else "chat"
+    message_time = _parse_message_time(req.message_timestamp)
+    message_timestamp = message_time.isoformat()
 
     # 保存用户消息（带当前 mode 标签，供后续按 mode 分流加载）
-    save_chat_message(user_id, req.session_id, "user", req.message, mode)
+    save_chat_message(
+        user_id, req.session_id, "user", req.message, mode,
+        created_at=message_timestamp,
+    )
 
     # 加载历史 · 非对称过滤：
     # - 闲聊模式：只拉 mode='chat'，防止 DS 看到 plan 模式 tool call 结果
@@ -195,6 +225,14 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     history_mode = "chat" if mode == "chat" else None
     history = load_session_messages(user_id, req.session_id, mode=history_mode)
     history = history[:-1]  # 排除刚保存的这条
+    previous_timestamp = next(
+        (item.get("timestamp") for item in reversed(history) if item.get("timestamp")),
+        None,
+    )
+    task_day_changed = bool(
+        previous_timestamp
+        and _task_day_date(previous_timestamp) != _task_day_date(message_timestamp)
+    )
 
     # 一次性 SELECT * 读 user_profile 所有字段，分发给各处用——替代原本的 4 次独立查询
     full_profile = get_full_profile(user_id)
@@ -232,6 +270,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
             mode=mode,
             user_id=user_id,
             user_llm=user_llm,
+            task_day_changed=task_day_changed,
         )
     except Exception as e:
         logging.error(f"聊天调用出错: {type(e).__name__}: {e}")
@@ -241,7 +280,11 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     confirmed = chat_result.get("confirmed", False)
 
     # save_chat_message 走 INSERT 不走 upsert——等 reply 最终定版才写
-    save_chat_message(user_id, req.session_id, "assistant", reply, mode)
+    reply_timestamp = now_cn().isoformat()
+    save_chat_message(
+        user_id, req.session_id, "assistant", reply, mode,
+        created_at=reply_timestamp,
+    )
 
     # 关键词匹配（零 API 成本，闲聊模式下帮印象系统刷新计数）
     try:
@@ -262,6 +305,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
 
     return ChatResponse(
         reply=reply,
+        reply_timestamp=reply_timestamp,
         confirmed=confirmed,
         created_tasks=chat_result.get("created_tasks") or [],
         pending_deletes=chat_result.get("pending_deletes") or [],
