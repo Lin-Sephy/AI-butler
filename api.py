@@ -31,7 +31,7 @@ from core.memory import (
     update_ai_memory, get_filtered_daily_memo, bump_on_mention,
     get_confirmed_impressions_text, get_impressions_display,
 )
-from core.intent import call_chat
+from core.intent import call_chat, summarize_chat_handoff
 from core.task_manager import (
     create_task, pause_task, resume_task, complete_task, abandon_task,
     get_active_task, update_task_minutes, update_task_keyword,
@@ -177,6 +177,20 @@ def _task_day_date(value: str | None):
     return current.date()
 
 
+def _recent_plan_handoff(history: list[dict], limit: int = 10) -> list[dict]:
+    """取切换前连续的任务模式对话，最多约 5 轮。"""
+    handoff: list[dict] = []
+    for item in reversed(history):
+        if item.get("role") not in ("user", "assistant"):
+            continue
+        if (item.get("mode") or "chat") != "plan":
+            break
+        handoff.append(item)
+        if len(handoff) >= limit:
+            break
+    return list(reversed(handoff))
+
+
 def _build_task_board_text(user_id: str) -> str:
     """构建任务栏文本，传给 DS 聊天时参考。"""
     tasks = get_today_tasks(user_id)
@@ -212,21 +226,43 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     message_time = _parse_message_time(req.message_timestamp)
     message_timestamp = message_time.isoformat()
 
+    # 先读取发送前的历史，避免前端设备时间偏差导致当前消息排序后不在末尾。
+    full_history = load_session_messages(user_id, req.session_id)
+
     # 保存用户消息（带当前 mode 标签，供后续按 mode 分流加载）
     save_chat_message(
         user_id, req.session_id, "user", req.message, mode,
         created_at=message_timestamp,
     )
 
-    # 加载历史 · 非对称过滤：
-    # - 闲聊模式：只拉 mode='chat'，防止 DS 看到 plan 模式 tool call 结果
-    #   然后幻觉出"你任务栏有 XX"这种不存在的事
-    # - 任务模式：拉全部（闲聊 + 任务），DS 需要完整上下文来排任务
-    history_mode = "chat" if mode == "chat" else None
-    history = load_session_messages(user_id, req.session_id, mode=history_mode)
-    history = history[:-1]  # 排除刚保存的这条
+    # 按模式整理历史。闲聊不读取任务模式原文，只在真正
+    # 从任务模式切回时生成一次受限摘要，保留非任务话题的连续性。
+    if mode == "chat":
+        history = [
+            item for item in full_history
+            if (item.get("mode") or "chat") == "chat"
+        ]
+    else:
+        history = full_history
+
+    previous_conversation = next(
+        (
+            item for item in reversed(full_history)
+            if item.get("role") in ("user", "assistant")
+        ),
+        None,
+    )
+    switched_to_chat = bool(
+        mode == "chat"
+        and previous_conversation
+        and (previous_conversation.get("mode") or "chat") == "plan"
+    )
     previous_timestamp = next(
-        (item.get("timestamp") for item in reversed(history) if item.get("timestamp")),
+        (
+            item.get("timestamp")
+            for item in reversed(full_history)
+            if item.get("timestamp")
+        ),
         None,
     )
     task_day_changed = bool(
@@ -246,6 +282,12 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
         "model": full_profile.get("llm_model", ""),
         "api_key": full_profile.get("llm_api_key", ""),
     }
+    chat_handoff_summary = ""
+    if switched_to_chat:
+        chat_handoff_summary = summarize_chat_handoff(
+            _recent_plan_handoff(full_history),
+            user_llm=user_llm,
+        )
 
     # 聊天调用
     try:
@@ -271,6 +313,8 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
             user_id=user_id,
             user_llm=user_llm,
             task_day_changed=task_day_changed,
+            chat_handoff_summary=chat_handoff_summary,
+            switched_to_chat=switched_to_chat,
         )
     except Exception as e:
         logging.error(f"聊天调用出错: {type(e).__name__}: {e}")
