@@ -111,6 +111,14 @@ def _delete(table: str, params: dict) -> None:
     resp.raise_for_status()
 
 
+def _best_effort_post(table: str, data: dict) -> None:
+    """Best-effort INSERT for non-critical observability data."""
+    try:
+        _post(table, data, return_row=False)
+    except Exception as e:
+        logging.warning(f"[DB] best-effort insert into {table} failed: {type(e).__name__}: {e}")
+
+
 def init_db():
     """Supabase 表已通过 SQL Editor 创建，此函数仅做兼容保留。"""
     pass
@@ -328,6 +336,14 @@ def load_session_messages(user_id: str, session_id: str, mode: str | None = None
         }
         for r in rows
     ]
+
+
+def save_chat_trace(trace: dict) -> None:
+    """保存一轮聊天 trace。
+
+    表尚未迁移或网络短暂失败时不影响主聊天链路。
+    """
+    _best_effort_post("chat_trace", trace)
 
 
 def _format_session_title_date(date_text: str | None) -> str:

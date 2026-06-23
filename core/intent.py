@@ -15,6 +15,7 @@ from openai import OpenAI
 import config
 from prompts.system_prompt import get_chat_prompt, build_chat_message
 from core.plan_tools import PLAN_MODE_TOOLS, execute_tool
+from core.chat_trace import compact_json, clip_text
 
 # ---- API 调用参数 ----
 API_CONFIG = {
@@ -197,7 +198,15 @@ def call_chat(user_input: str,
     has_user_key = bool(user_llm and user_llm.get("api_key") and user_llm.get("base_url") and user_llm.get("model"))
     if not has_user_key and not config.DEEPSEEK_API_KEY:
         fallback = MID_CHAT_FALLBACK if has_history else FRESH_FALLBACK
-        return {"reply": fallback, "confirmed": False}
+        return {
+            "reply": fallback,
+            "confirmed": False,
+            "trace": {
+                "status": "fallback",
+                "fallback_reason": "missing_model_api_key",
+                "tools_enabled": mode == "plan",
+            },
+        }
 
     try:
         client, model_name = _get_client(user_llm)
@@ -227,6 +236,26 @@ def call_chat(user_input: str,
 
         tools = PLAN_MODE_TOOLS if mode == "plan" else None
         logging.warning(f"[Chat] mode={mode} tools={'on' if tools else 'off'} user_msg={user_input[:60]!r}")
+        recent_history = chat_history[-20:] if chat_history else []
+        trace_info = {
+            "status": "started",
+            "model": model_name,
+            "tools_enabled": bool(tools),
+            "prompt": {
+                "history_count": len(chat_history or []),
+                "raw_count": len(recent_history),
+                "system_prompt_chars": len(system_prompt),
+                "user_context_chars": len(user_message),
+                "raw_history_preview": [
+                    {
+                        "role": item.get("role"),
+                        "content": clip_text(item.get("content", ""), 240),
+                    }
+                    for item in recent_history
+                ],
+            },
+            "tool_calls": [],
+        }
 
         # Function calling 循环：闲聊模式一次就出；计划模式可能调工具再返
         raw_final = ""
@@ -259,6 +288,12 @@ def call_chat(user_input: str,
                     args = {}
                 result = execute_tool(user_id, name, args)
                 logging.warning(f"[Chat] tool={name} args={args} → {result[:120]}")
+                trace_info["tool_calls"].append({
+                    "name": name,
+                    "args": compact_json(args, 240),
+                    "result_excerpt": clip_text(result, 800),
+                    "status": "error" if '"error"' in result else "success",
+                })
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -314,6 +349,13 @@ def call_chat(user_input: str,
                         args = {}
                     result = execute_tool(user_id, name, args)
                     logging.warning(f"[Chat] 补调 tool={name} args={args} → {result[:120]}")
+                    trace_info["tool_calls"].append({
+                        "name": name,
+                        "args": compact_json(args, 240),
+                        "result_excerpt": clip_text(result, 800),
+                        "status": "error" if '"error"' in result else "success",
+                        "retry_reason": "model_claimed_create_without_tool",
+                    })
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
                     if name == "create_tasks":
                         try:
@@ -326,12 +368,20 @@ def call_chat(user_input: str,
         reply, confirmed = _parse_chat_reply(raw_final, mode=mode)
         if not reply:
             reply = FRESH_FALLBACK
+        trace_info["status"] = "success"
+        trace_info["final"] = {
+            "reply_chars": len(reply),
+            "confirmed": confirmed,
+            "created_count": len(created_tasks),
+            "pending_delete_count": len(pending_deletes),
+        }
 
         return {
             "reply": reply,
             "confirmed": confirmed,
             "created_tasks": created_tasks,
             "pending_deletes": pending_deletes,
+            "trace": trace_info,
         }
 
     except Exception as e:
@@ -341,4 +391,11 @@ def call_chat(user_input: str,
             "reply": fallback,
             "confirmed": False,
             "created_tasks": [],
+            "pending_deletes": [],
+            "trace": {
+                "status": "fallback",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "tools_enabled": mode == "plan",
+            },
         }

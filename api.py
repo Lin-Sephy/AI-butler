@@ -8,6 +8,7 @@ v2 多用户改造（2026-04-15）：
 
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 from db.database import (
     init_db, save_action_log, get_user_memo, save_user_memo,
     clear_ai_memo, save_chat_message, load_session_messages, list_chat_sessions, now_cn,
+    save_chat_trace,
     get_companion_name, save_companion_name,
     get_custom_persona, save_custom_persona,
     get_companion_profile as db_get_companion_profile,
@@ -32,6 +34,7 @@ from core.memory import (
     get_confirmed_impressions_text, get_impressions_display,
 )
 from core.intent import call_chat, summarize_chat_handoff
+from core.chat_trace import new_trace_id, context_summary, clip_text, compact_json
 from core.task_manager import (
     create_task, pause_task, resume_task, complete_task, abandon_task,
     get_active_task, update_task_minutes, update_task_keyword,
@@ -90,6 +93,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     reply_timestamp: str
+    trace_id: str = ""
     confirmed: bool = False  # v5 计划模式：DS 是否判定用户已定稿
     created_tasks: list[dict] = []  # v5 计划模式：本轮 create_tasks 工具写入的任务，前端弹窗用
     pending_deletes: list[dict] = []  # v5 计划模式：本轮 delete_task(s) 待确认删除，前端弹窗用
@@ -222,6 +226,8 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     闲聊模式：DS 纯文本输出，无信号块，无推任务。
     计划模式：DS 注册 function calling 工具，可能输出 ---judgment---{"confirmed": true}。
     """
+    started_at = time.monotonic()
+    trace_id = new_trace_id(user_id)
     mode = req.mode if req.mode in ("chat", "plan") else "chat"
     message_time = _parse_message_time(req.message_timestamp)
     message_timestamp = message_time.isoformat()
@@ -290,6 +296,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
         )
 
     # 聊天调用
+    injected_context = {}
     try:
         memo = full_profile.get("user_memo", "")
         ai_memo_text = get_confirmed_impressions_text(
@@ -300,6 +307,16 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
         )
         # v5 任务栏不预喂：闲聊模式不聊任务，计划模式 DS 用 query_tasks 按需查（更精准）
         task_board_text = ""
+        injected_context = context_summary(
+            user_memo=memo,
+            ai_memo=ai_memo_text,
+            daily_memo=daily_memo_text,
+            task_board=task_board_text,
+            chat_handoff_summary=chat_handoff_summary,
+            history_count=len(history),
+            task_day_changed=task_day_changed,
+            switched_to_chat=switched_to_chat,
+        )
 
         chat_result = call_chat(
             req.message,
@@ -318,7 +335,15 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
         )
     except Exception as e:
         logging.error(f"聊天调用出错: {type(e).__name__}: {e}")
-        chat_result = {"reply": "哎呀，出了点小问题。你再说一次？", "confirmed": False}
+        chat_result = {
+            "reply": "哎呀，出了点小问题。你再说一次？",
+            "confirmed": False,
+            "trace": {
+                "status": "fallback",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+            },
+        }
 
     reply = chat_result["reply"]
     confirmed = chat_result.get("confirmed", False)
@@ -329,6 +354,34 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
         user_id, req.session_id, "assistant", reply, mode,
         created_at=reply_timestamp,
     )
+
+    trace_info = chat_result.get("trace") or {}
+    trace_payload = {
+        "trace_id": trace_id,
+        "user_id": user_id,
+        "session_id": req.session_id,
+        "mode": mode,
+        "status": trace_info.get("status") or "success",
+        "message_excerpt": clip_text(req.message, 500),
+        "context_json": compact_json(injected_context, 500),
+        "model_json": compact_json({
+            "model": trace_info.get("model"),
+            "tools_enabled": trace_info.get("tools_enabled"),
+            "prompt": trace_info.get("prompt"),
+        }, 500),
+        "tool_calls_json": compact_json(trace_info.get("tool_calls") or [], 500),
+        "response_excerpt": clip_text(reply, 700),
+        "result_json": compact_json({
+            "confirmed": confirmed,
+            "created_tasks": chat_result.get("created_tasks") or [],
+            "pending_deletes": chat_result.get("pending_deletes") or [],
+            "final": trace_info.get("final") or {},
+        }, 500),
+        "error_message": clip_text(trace_info.get("error_message") or "", 500),
+        "latency_ms": int((time.monotonic() - started_at) * 1000),
+        "created_at": reply_timestamp,
+    }
+    background_tasks.add_task(save_chat_trace, trace_payload)
 
     # 关键词匹配（零 API 成本，闲聊模式下帮印象系统刷新计数）
     try:
@@ -350,6 +403,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     return ChatResponse(
         reply=reply,
         reply_timestamp=reply_timestamp,
+        trace_id=trace_id,
         confirmed=confirmed,
         created_tasks=chat_result.get("created_tasks") or [],
         pending_deletes=chat_result.get("pending_deletes") or [],
