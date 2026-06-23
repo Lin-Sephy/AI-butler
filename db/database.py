@@ -284,7 +284,7 @@ def get_companion_profile(user_id: str) -> dict:
 # ---- chat_session CRUD ----
 
 def save_chat_message(user_id: str, session_id: str, role: str, content: str,
-                      mode: str = "chat", created_at: str | None = None) -> None:
+                      mode: str = "chat", created_at: str | None = None) -> dict | None:
     """保存一条聊天消息。mode: 'chat' | 'plan'，用于后续分流加载。"""
     saved_at = created_at or now_cn().isoformat()
     try:
@@ -295,7 +295,7 @@ def save_chat_message(user_id: str, session_id: str, role: str, content: str,
     except (TypeError, ValueError):
         saved_at = now_cn().isoformat()
         today = now_cn().strftime("%Y-%m-%d")
-    _post("chat_session", {
+    return _post("chat_session", {
         "user_id": user_id,
         "session_id": session_id,
         "role": role,
@@ -303,7 +303,7 @@ def save_chat_message(user_id: str, session_id: str, role: str, content: str,
         "mode": mode,
         "session_date": today,
         "created_at": saved_at,
-    }, return_row=False)
+    })
 
 
 def load_session_messages(user_id: str, session_id: str, mode: str | None = None) -> list[dict]:

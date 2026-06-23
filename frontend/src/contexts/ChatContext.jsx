@@ -143,7 +143,9 @@ export function ChatProvider({ children }) {
       if (!sessionId || !text.trim()) return
       setError(null)
       const messageTimestamp = new Date().toISOString()
+      const clientId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`
       const userMessage = {
+        clientId,
         role: 'user',
         content: text,
         mode,
@@ -159,13 +161,35 @@ export function ChatProvider({ children }) {
           messageTimestamp,
         })
         const assistantMessage = {
+          id: resp.reply_message_id,
           role: 'assistant',
           content: resp.reply,
           mode,
           timestamp: Date.parse(resp.reply_timestamp),
         }
-        setMessages(m => [...m, assistantMessage])
-        addSessionMessage(sessionId, assistantMessage).catch(() => {})
+        setMessages(current => {
+          const next = [
+            ...current.map(message => (
+              message.clientId === clientId
+                ? { ...message, id: resp.user_message_id, clientId: undefined }
+                : message
+            )),
+            assistantMessage,
+          ]
+          saveSessionMessages(sessionId, next).catch(() => {})
+          return next
+        })
+        if (!resp.user_message_id || !resp.reply_message_id) {
+          loadHistory(sessionId)
+            .then(data => {
+              const history = data.messages || []
+              if (history.length > 0) {
+                setMessages(history)
+                saveSessionMessages(sessionId, history).catch(() => {})
+              }
+            })
+            .catch(() => {})
+        }
         const created = resp.created_tasks || []
         if (created.length > 0) {
           setLastCreatedTasks(created)

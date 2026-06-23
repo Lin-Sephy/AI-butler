@@ -93,6 +93,8 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     reply_timestamp: str
+    user_message_id: int | None = None
+    reply_message_id: int | None = None
     trace_id: str = ""
     confirmed: bool = False  # v5 计划模式：DS 是否判定用户已定稿
     created_tasks: list[dict] = []  # v5 计划模式：本轮 create_tasks 工具写入的任务，前端弹窗用
@@ -236,7 +238,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     full_history = load_session_messages(user_id, req.session_id)
 
     # 保存用户消息（带当前 mode 标签，供后续按 mode 分流加载）
-    save_chat_message(
+    user_message_row = save_chat_message(
         user_id, req.session_id, "user", req.message, mode,
         created_at=message_timestamp,
     )
@@ -350,7 +352,7 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
 
     # save_chat_message 走 INSERT 不走 upsert——等 reply 最终定版才写
     reply_timestamp = now_cn().isoformat()
-    save_chat_message(
+    reply_message_row = save_chat_message(
         user_id, req.session_id, "assistant", reply, mode,
         created_at=reply_timestamp,
     )
@@ -403,6 +405,8 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks,
     return ChatResponse(
         reply=reply,
         reply_timestamp=reply_timestamp,
+        user_message_id=(user_message_row or {}).get("id"),
+        reply_message_id=(reply_message_row or {}).get("id"),
         trace_id=trace_id,
         confirmed=confirmed,
         created_tasks=chat_result.get("created_tasks") or [],

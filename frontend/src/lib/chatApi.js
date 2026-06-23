@@ -39,6 +39,9 @@ export async function listSessions() {
  * @param {{message: string, sessionId: string, mode?: 'chat'|'plan'}} opts
  * @returns {Promise<{
  *   reply: string,
+ *   user_message_id: number,
+ *   reply_message_id: number,
+ *   trace_id: string,
  *   confirmed: boolean,         // 计划模式下 DS 是否判定用户定稿
  *   created_tasks: Array<{task_id, keyword, minutes, scheduled_at, status}>,  // 本轮 DS 写入的任务
  * }>}
