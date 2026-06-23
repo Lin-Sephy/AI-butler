@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>C-8 thinking 泡泡偏移对比</title>
+<style>
+  :root {
+    --base-h: 222; --base-s: 57%; --base-l: 96%;
+    --primary-h: 202; --primary-s: 45%; --primary-l: 52%;
+    --text-h: 240; --text-s: 3%; --text-l: 21%;
+
+    --color-base: hsl(var(--base-h), var(--base-s), var(--base-l));
+    --color-primary: hsl(var(--primary-h), var(--primary-s), var(--primary-l));
+    --color-text: hsl(var(--text-h), var(--text-s), var(--text-l));
+    --color-subtle: hsl(var(--text-h), var(--text-s), 45%);
+    --color-line: hsl(var(--text-h), var(--text-s), 85%);
+    --color-surface: #ffffff;
+    --radius: 20px;
+  }
+
+  html, body {
+    margin: 0; padding: 0;
+    font-family: 'IBM Plex Serif', 'Noto Serif SC', Georgia, serif;
+    color: var(--color-text);
+    background: var(--color-base);
+    min-height: 100vh;
+  }
+
+  .page {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+
+  h1 { font-size: 22px; font-weight: 400; margin: 0 0 6px; }
+  .subtitle {
+    font-size: 13px;
+    color: var(--color-subtle);
+    margin: 0 0 24px;
+    line-height: 1.5;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+  }
+
+  .col {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius);
+    padding: 20px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .col-title {
+    font-size: 14px;
+    font-weight: 400;
+    margin: 0 0 4px;
+    text-align: center;
+  }
+  .col-meta {
+    font-size: 11px;
+    color: var(--color-subtle);
+    margin: 0 0 20px;
+    font-family: 'Inter', system-ui, monospace;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  /* StoatHalf 复刻 */
+  .stoat-wrap {
+    width: 180px;
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+    margin-bottom: 8px;
+  }
+  .stoat-wrap img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  .bubble {
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    background: white;
+    border: 1.5px solid var(--color-text);
+    border-radius: 14px;
+    padding: 4px 10px;
+    display: flex;
+    gap: 3px;
+    line-height: 0;
+    z-index: 2;
+  }
+  .bubble.ofs-neg50 { transform: translateX(-50%); }   /* 完全居中 */
+  .bubble.ofs-neg25 { transform: translateX(-25%); }   /* 略偏右 */
+  .bubble.ofs-0     { transform: translateX(0%); }     /* 自身左缘贴容器中心 */
+  .bubble.ofs-15    { transform: translateX(15%); }    /* 我推荐 */
+  .bubble.ofs-40    { transform: translateX(40%); }    /* 当前 */
+
+  .dot {
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--color-text);
+    display: inline-block;
+    animation: think-dot 1.4s ease-in-out infinite;
+  }
+  .dot:nth-child(2) { animation-delay: 0.2s; }
+  .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes think-dot {
+    0%, 80%, 100% { opacity: 0.3; }
+    40%           { opacity: 1; }
+  }
+
+  /* 容器中心参考线（可开关） */
+  .stoat-wrap::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0;
+    left: 50%;
+    width: 1px;
+    background: rgba(255, 0, 0, 0.15);
+    z-index: 1;
+  }
+  .hide-guide .stoat-wrap::before { display: none; }
+
+  .toggle-row {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    font-size: 13px;
+  }
+  .toggle-row button {
+    padding: 6px 14px;
+    border: 1px solid var(--color-line);
+    background: white;
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 999px;
+  }
+  .toggle-row button.active {
+    border-color: var(--color-primary);
+    background: hsl(202, 45%, 93%);
+    color: var(--color-primary);
+  }
+
+  .callout {
+    background: hsl(198, 45%, 95%);
+    border: 1px solid hsl(198, 45%, 80%);
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: 13px;
+    margin-top: 24px;
+    line-height: 1.6;
+  }
+  .callout b { color: var(--color-primary); }
+
+  .recommend {
+    background: hsl(202, 45%, 93%);
+    border-color: var(--color-primary);
+  }
+  .current {
+    background: #fff8e6;
+    border-color: #f0c040;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>C-8 thinking 泡泡偏移对比</h1>
+  <p class="subtitle">
+    当前 `StoatHalf.jsx:77` 用 `transform: translateX(40%)`，泡泡从"左缘贴容器中心"再往右偏泡泡自身宽度的 40%，最后视觉上在容器右侧 60% 附近——像 UI bug。<br>
+    五档从"完全居中"到"当前偏右 40%"对比。红色细线是容器中心参考线。
+  </p>
+
+  <div class="toggle-row">
+    <span style="align-self: center; color: var(--color-subtle); font-size: 12px;">参考线：</span>
+    <button class="active" onclick="toggleGuide(true)">显示</button>
+    <button onclick="toggleGuide(false)">隐藏</button>
+  </div>
+
+  <div class="grid" id="grid">
+
+    <div class="col">
+      <div class="col-title">A</div>
+      <div class="col-meta">translateX(-50%)<br><b>完全居中</b></div>
+      <div class="stoat-wrap">
+        <div class="bubble ofs-neg50">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+        <img src="../../frontend/src/assets/stoat-side.svg" alt="小白侧脸">
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="col-title">B</div>
+      <div class="col-meta">translateX(-25%)<br>略偏右</div>
+      <div class="stoat-wrap">
+        <div class="bubble ofs-neg25">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+        <img src="../../frontend/src/assets/stoat-side.svg" alt="小白侧脸">
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="col-title">C</div>
+      <div class="col-meta">translateX(0%)<br>左缘贴中心</div>
+      <div class="stoat-wrap">
+        <div class="bubble ofs-0">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+        <img src="../../frontend/src/assets/stoat-side.svg" alt="小白侧脸">
+      </div>
+    </div>
+
+    <div class="col recommend">
+      <div class="col-title">D ⭐ 推荐</div>
+      <div class="col-meta">translateX(15%)<br>微偏右对齐头部</div>
+      <div class="stoat-wrap">
+        <div class="bubble ofs-15">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+        <img src="../../frontend/src/assets/stoat-side.svg" alt="小白侧脸">
+      </div>
+    </div>
+
+    <div class="col current">
+      <div class="col-title">E（当前）</div>
+      <div class="col-meta">translateX(40%)<br>偏出头顶</div>
+      <div class="stoat-wrap">
+        <div class="bubble ofs-40">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+        <img src="../../frontend/src/assets/stoat-side.svg" alt="小白侧脸">
+      </div>
+    </div>
+
+  </div>
+
+  <div class="callout">
+    <b>我的倾向</b>：D（15%）。<br>
+    理由：侧脸白鼬的头其实是朝右的，头顶中心比容器中心略靠右一点点（不像正脸头就在中央）。
+    <ul style="margin: 8px 0; padding-left: 20px;">
+      <li><b>A 完全居中（-50%）</b> 对正脸合适，对侧脸看着像泡泡"往左歪"</li>
+      <li><b>B / C</b> 折中，还是略偏左感</li>
+      <li><b>D 15%</b> 视觉上泡泡对准侧脸头顶，不像 bug</li>
+      <li><b>E 40%</b> 泡泡基本挂在白鼬耳朵后面了，像没对齐</li>
+    </ul>
+    <b>不改的理由</b>：如果你觉得当前 40% 其实是"故意偏出去假装白鼬在抬头看泡泡"，那保留也行。这条本来就不是必修，只是看起来像 bug 才放进必要清单。
+  </div>
+</div>
+
+<script>
+  function toggleGuide(show) {
+    const grid = document.getElementById('grid')
+    grid.classList.toggle('hide-guide', !show)
+    document.querySelectorAll('.toggle-row button').forEach(b => b.classList.remove('active'))
+    event.target.classList.add('active')
+  }
+</script>
+</body>
+</html>

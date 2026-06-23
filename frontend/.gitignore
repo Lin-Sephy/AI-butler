@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.vite/
+*.log
+
+# 本地环境变量（含 Supabase URL/key、API base URL）
+.env.local
+.env.*.local

@@ -1,7 +1,38 @@
 .env
+workers-api/.dev.vars
+workers-api/.wrangler/
+workers-api/.wrangler-config/
+workers-api/.wrangler-dev.*
+workers-api/node_modules/
 .streamlit/secrets.toml
 __pycache__/
 *.pyc
 .DS_Store
 *.db
 .claude/
+
+# 私人对话记录
+docs/conversations/
+that-afternoon.html
+
+# 无关文件
+.playwright-mcp/
+telegrambot_template_v2.0*/
+telegrambot_记忆参考源码/
+
+# 素材 / 图片（付费素材包 + 参考图，不进仓库）
+front-end assets/
+pictures/
+
+# 私人文档
+docs/AI笔友/
+docs/产品文档/
+docs/D盘清理计划.md
+docs/portfolio/
+
+# 记忆系统（私人，本地维护）
+anchor_db/
+anchor_memory_lib/
+
+# 调试临时截图（根目录）—— Playwright/手工调试出来的 PNG 不进库
+/*.png

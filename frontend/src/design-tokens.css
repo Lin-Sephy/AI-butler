@@ -1,0 +1,45 @@
+/**
+ * Design Tokens · v1 淡蓝紫雪地（2026-04-15 定稿）
+ *
+ * 来源：frontend/prototype.html 调参导出
+ * 备份：docs/references/白鼬/tokens_候选v1_淡蓝紫雪地_选中.json
+ *
+ * 改色/改风格请先回 prototype.html 调，导出 JSON 后回填这里——
+ * 不要直接在 React 组件里写死 hex/HSL，全部走这里的 CSS 变量。
+ */
+
+:root {
+  /* ─── Color primitives (HSL components) ─── */
+  /* base 起源自 参考_真实雪地_纹理.jpg HSL(222,25%,76%)，调到 (222,57%,96%) "淡蓝紫雪地" */
+  --base-h: 222; --base-s: 57%; --base-l: 96%;
+  /* 取自 色板_像素雪地_UI主池.swatches；放弃绿色，蓝/白/黑/灰作主，粉只给白鼬五官 */
+  --primary-h: 202; --primary-s: 45%; --primary-l: 52%;
+  --accent-h: 198; --accent-s: 45%; --accent-l: 85%;
+  --text-h: 240; --text-s: 3%; --text-l: 21%;
+
+  /* ─── Computed colors ─── */
+  --color-base: hsl(var(--base-h), var(--base-s), var(--base-l));         /* 全局底 / 雪地 */
+  --color-primary: hsl(var(--primary-h), var(--primary-s), var(--primary-l));  /* 按钮 / 高亮 */
+  --color-accent: hsl(var(--accent-h), var(--accent-s), var(--accent-l));      /* chip / 进度条 / 次要 */
+  --color-text: hsl(var(--text-h), var(--text-s), var(--text-l));         /* 主文字 */
+  --color-subtle: hsl(var(--text-h), var(--text-s), 45%);                 /* 次要文字 / icon */
+  --color-line: hsl(var(--text-h), var(--text-s), 85%);                   /* 描边 / 分隔 */
+  --color-surface: #ffffff;                                                /* 卡片 / 气泡白底 */
+  --color-primary-soft: hsl(var(--primary-h), var(--primary-s), 93%);     /* primary 浅底 hover */
+  --color-accent-soft: hsl(var(--accent-h), var(--accent-s), 95%);        /* accent 浅底 hover */
+
+  /* ─── Shape & motion ─── */
+  --radius: 20px;
+  --transition: 350ms;
+  --shadow-blur: 0px;          /* 默认无硬阴影——绘本感靠线不靠浮 */
+  --shadow-opacity: 0;
+
+  /* ─── Type ─── */
+  --font-weight: 400;
+  --font-family: 'IBM Plex Serif', 'Noto Serif SC', Georgia, serif;
+  --line-height: 1.6;
+
+  /* ─── Texture layers ─── */
+  --paper-texture: 0.22;
+  --forest-watermark: 0;       /* 默认关；要的话拉到 0.05-0.15，SVG 颜色已是冷蓝不是松针绿 */
+}

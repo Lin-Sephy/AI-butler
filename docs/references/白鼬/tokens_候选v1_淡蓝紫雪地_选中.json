@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "exportedAt": "2026-04-15T09:16:05.358Z",
+    "source": "prototype.html",
+    "note": "Design tokens for AI-butler v2. Paste to small-ke, who will convert to React design tokens."
+  },
+  "colors": {
+    "base": "hsl(222, 57%, 96%)",
+    "primary": "hsl(202, 45%, 52%)",
+    "accent": "hsl(198, 45%, 85%)",
+    "text": "hsl(240, 3%, 21%)"
+  },
+  "colorsHSL": {
+    "base": {
+      "h": 222,
+      "s": 57,
+      "l": 96
+    },
+    "primary": {
+      "h": 202,
+      "s": 45,
+      "l": 52
+    },
+    "accent": {
+      "h": 198,
+      "s": 45,
+      "l": 85
+    },
+    "text": {
+      "h": 240,
+      "s": 3,
+      "l": 21
+    }
+  },
+  "shape": {
+    "radius": "20px",
+    "shadowBlur": "0px",
+    "shadowOpacity": 0
+  },
+  "motion": {
+    "transition": "350ms"
+  },
+  "type": {
+    "fontFamily": "'IBM Plex Serif', 'Noto Serif SC', Georgia, serif",
+    "fontWeight": 400,
+    "lineHeight": 1.6
+  },
+  "texture": {
+    "paperTexture": 0.22,
+    "forestWatermark": 0
+  }
+}

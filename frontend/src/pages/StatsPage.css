@@ -1,0 +1,133 @@
+/* StatsPage · 专属动画和响应式
+ * 只放 @keyframes 和 @media（inline style 不支持的那些）
+ * 其他样式全部 inline，保持项目一贯 */
+
+@keyframes stats-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes stats-grow {
+  from { height: 0 !important; opacity: 0; }
+}
+
+@keyframes stats-tree-rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to   { opacity: var(--tree-opacity, 1); transform: translateY(0) scale(1); }
+}
+
+@keyframes stats-snowfall {
+  0%   { transform: translateY(0) translateX(0); }
+  50%  { transform: translateY(50vh) translateX(20px); }
+  100% { transform: translateY(110vh) translateX(-10px); }
+}
+
+.stats-card {
+  animation: stats-rise 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.stats-card:nth-of-type(1) { animation-delay: 0ms; }
+.stats-card:nth-of-type(2) { animation-delay: 80ms; }
+.stats-card:nth-of-type(3) { animation-delay: 160ms; }
+.stats-card:nth-of-type(4) { animation-delay: 240ms; }
+
+.stats-bar {
+  animation: stats-grow 700ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  transition: filter 200ms ease;
+  cursor: pointer;
+}
+.stats-bar:hover {
+  filter: brightness(0.92);
+}
+
+.stats-tree {
+  animation: stats-tree-rise 1200ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  transform-origin: 50% 100%;
+}
+
+/* 横向滚动条细化 */
+.stats-bars-scroll::-webkit-scrollbar { height: 4px; }
+.stats-bars-scroll::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 99px; }
+.stats-bars-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* tooltip · 放在 bar 内部 hover 显示 */
+.stats-bar-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translate(-50%, 4px);
+  background: var(--color-text);
+  color: var(--color-surface);
+  font-family: 'IBM Plex Serif', 'Noto Serif SC', serif;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 200ms ease;
+  font-variant-numeric: tabular-nums;
+  z-index: 3;
+}
+.stats-bar:hover .stats-bar-tooltip {
+  opacity: 1;
+  transform: translate(-50%, -4px);
+}
+
+/* 飘雪装饰 */
+.stats-snow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.stats-snow span {
+  position: absolute;
+  top: -20px;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: hsl(202, 40%, 75%);
+  opacity: 0.35;
+  animation: stats-snowfall linear infinite;
+}
+.stats-snow span:nth-child(1) { left: 8%;  animation-duration: 22s; animation-delay: 0s;  width: 3px; height: 3px; }
+.stats-snow span:nth-child(2) { left: 28%; animation-duration: 28s; animation-delay: 6s; }
+.stats-snow span:nth-child(3) { left: 55%; animation-duration: 24s; animation-delay: 12s; width: 5px; height: 5px; opacity: 0.25; }
+.stats-snow span:nth-child(4) { left: 78%; animation-duration: 30s; animation-delay: 3s; }
+.stats-snow span:nth-child(5) { left: 92%; animation-duration: 26s; animation-delay: 14s; width: 3px; height: 3px; }
+
+/* 响应式 · 手机端 */
+@media (max-width: 640px) {
+  .stats-hero { padding: 28px 22px 26px !important; }
+  .stats-hero-body {
+    flex-direction: column !important;
+    gap: 20px !important;
+  }
+  .stats-hero-side {
+    border-left: none !important;
+    border-top: 1px solid var(--color-line) !important;
+    padding-left: 0 !important;
+    padding-top: 18px !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    flex-wrap: wrap !important;
+    gap: 20px !important;
+  }
+  .stats-hero-number { font-size: 64px !important; }
+  .stats-hero-number .stats-hero-unit { font-size: 18px !important; }
+  .stats-page-title { font-size: 24px !important; }
+  .stats-card { padding: 24px 20px 22px !important; }
+  .stats-grove-card { padding: 24px 20px 0 !important; }
+  .stats-grove-svg-wrap { margin: 0 -20px !important; }
+  .stats-grove-days { font-size: 44px !important; }
+}
+
+@media (max-width: 400px) {
+  .stats-hero-number { font-size: 52px !important; }
+}
+
+.stats-tab:focus-visible,
+.stats-bar:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}

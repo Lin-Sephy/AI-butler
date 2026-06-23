@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>C-4 气泡统一方案对比</title>
+<style>
+  /* 复用 design-tokens.css 的 HSL */
+  :root {
+    --base-h: 222; --base-s: 57%; --base-l: 96%;
+    --primary-h: 202; --primary-s: 45%; --primary-l: 52%;
+    --accent-h: 198; --accent-s: 45%; --accent-l: 85%;
+    --text-h: 240; --text-s: 3%; --text-l: 21%;
+
+    --color-base: hsl(var(--base-h), var(--base-s), var(--base-l));
+    --color-primary: hsl(var(--primary-h), var(--primary-s), var(--primary-l));
+    --color-accent: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+    --color-text: hsl(var(--text-h), var(--text-s), var(--text-l));
+    --color-subtle: hsl(var(--text-h), var(--text-s), 45%);
+    --color-line: hsl(var(--text-h), var(--text-s), 85%);
+    --color-surface: #ffffff;
+    --color-accent-soft: hsl(var(--accent-h), var(--accent-s), 95%);
+    --radius: 20px;
+  }
+
+  html, body {
+    margin: 0; padding: 0;
+    font-family: 'IBM Plex Serif', 'Noto Serif SC', Georgia, serif;
+    color: var(--color-text);
+    background: var(--color-base);
+    min-height: 100vh;
+    line-height: 1.6;
+  }
+
+  .page {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 400;
+    margin: 0 0 6px;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: var(--color-subtle);
+    margin: 0 0 24px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+  }
+
+  .col {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    min-height: 560px;
+  }
+
+  .col-title {
+    font-size: 14px;
+    font-weight: 400;
+    margin: 0 0 4px;
+  }
+  .col-meta {
+    font-size: 12px;
+    color: var(--color-subtle);
+    margin: 0 0 20px;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  /* 气泡通用容器 */
+  .bubble-row {
+    display: flex;
+    margin-bottom: 14px;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  .bubble-row.left { justify-content: flex-start; }
+  .bubble-row.right { justify-content: flex-end; }
+
+  /* 头像 */
+  .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: white;
+    border: 1px solid var(--color-line);
+    flex-shrink: 0;
+    overflow: hidden;
+    line-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+
+  /* 现状-历史 AI 气泡：ChatBubble.jsx */
+  .history-ai {
+    max-width: 75%;
+  }
+  .history-ai-body {
+    padding: 10px 14px;
+    border-radius: 14px;
+    border-bottom-left-radius: 4px;
+    font-size: 14px;
+    background: var(--color-accent-soft);
+    color: var(--color-text);
+    border: 1px solid var(--color-accent);
+  }
+  /* 现状-历史 用户气泡 */
+  .history-user {
+    max-width: 75%;
+  }
+  .history-user-body {
+    padding: 10px 14px;
+    border-radius: 14px;
+    border-bottom-right-radius: 4px;
+    font-size: 14px;
+    background: var(--color-primary);
+    color: #fff;
+    border: 1px solid var(--color-primary);
+  }
+
+  /* 现状-主视图 AI 气泡：ChatPage SpeechBubble inline */
+  .main-ai-wrap {
+    position: relative;
+    max-width: 78%;
+    margin: 0 auto 20px;
+  }
+  .main-ai {
+    padding: 12px 16px;
+    border-radius: 16px;
+    font-size: 14px;
+    background: var(--color-surface);
+    border: 1.5px solid var(--color-line);
+    color: var(--color-text);
+    box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+  }
+  .main-ai-tail {
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 12px; height: 12px;
+    background: var(--color-surface);
+    border-right: 1.5px solid var(--color-line);
+    border-bottom: 1.5px solid var(--color-line);
+  }
+  /* 现状-主视图 用户气泡（UserBubble，无泡尾，堆叠） */
+  .main-user-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    max-width: 85%;
+    margin-left: auto;
+  }
+  .main-user {
+    background: var(--color-primary);
+    color: #fff;
+    border-radius: 14px;
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  .main-user.op65 { opacity: 0.65; }
+  .main-user.op35 { opacity: 0.35; }
+
+  /* 统一方案 —— 白底 + 灰边 + 圆角 16 + padding 12x16 */
+  .v3-ai-wrap {
+    position: relative;
+    max-width: 78%;
+    margin-left: 40px;  /* 给 avatar 留位 */
+  }
+  .v3-ai-wrap.with-tail-mode {
+    margin: 0 auto 20px;
+  }
+  .v3-ai {
+    padding: 12px 16px;
+    border-radius: 16px;
+    font-size: 14px;
+    background: var(--color-surface);
+    border: 1.5px solid var(--color-line);
+    color: var(--color-text);
+  }
+  .v3-ai-tail {
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 12px; height: 12px;
+    background: var(--color-surface);
+    border-right: 1.5px solid var(--color-line);
+    border-bottom: 1.5px solid var(--color-line);
+  }
+  .v3-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+    align-items: flex-end;
+    position: relative;
+  }
+  .v3-row.left { justify-content: flex-start; }
+  .v3-row.right { justify-content: flex-end; }
+  .v3-user {
+    background: var(--color-primary);
+    color: #fff;
+    border-radius: 14px;
+    padding: 10px 14px;
+    font-size: 14px;
+    max-width: 75%;
+  }
+
+  .section-head {
+    font-size: 12px;
+    font-family: 'Inter', system-ui, sans-serif;
+    color: var(--color-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 24px 0 10px;
+    border-bottom: 1px solid var(--color-line);
+    padding-bottom: 6px;
+  }
+  .section-head:first-of-type {
+    margin-top: 0;
+  }
+
+  .callout {
+    background: var(--color-accent-soft);
+    border: 1px solid var(--color-accent);
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--color-text);
+    margin-top: 16px;
+    line-height: 1.5;
+  }
+  .callout b { color: var(--color-primary); }
+
+  .main-stoat {
+    text-align: center;
+    font-size: 48px;
+    margin: 12px 0;
+    color: var(--color-subtle);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>C-4 气泡统一方案对比</h1>
+  <p class="subtitle">三列左到右：现状历史视图 ChatBubble / 现状主视图 SpeechBubble+UserBubble / 统一方案提案。设计 tokens 已和 design-tokens.css 对齐。</p>
+
+  <div class="grid">
+
+    <!-- 列 1：现状 - 历史视图 ChatBubble -->
+    <div class="col">
+      <div class="col-title">① 现状：历史视图 ChatBubble</div>
+      <div class="col-meta">淡冰蓝底 + 冰蓝边 · 左下尖 · 32x32 头像 · padding 10x14 · 圆角 14</div>
+
+      <div class="section-head">AI 气泡</div>
+      <div class="bubble-row left">
+        <div class="avatar">🐾</div>
+        <div class="history-ai">
+          <div class="history-ai-body">嗯，今天感觉怎么样？昨天说要整理笔记，动了吗～</div>
+        </div>
+      </div>
+
+      <div class="section-head">用户气泡</div>
+      <div class="bubble-row right">
+        <div class="history-user">
+          <div class="history-user-body">还没，下午才开始</div>
+        </div>
+      </div>
+
+      <div class="bubble-row left">
+        <div class="avatar">🐾</div>
+        <div class="history-ai">
+          <div class="history-ai-body">那先别纠结，等你有气再说。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <b>视觉特点：</b>带头像 + 暖底色 + 斜角尖。<br>
+        适合滚动阅读大量历史对话。
+      </div>
+    </div>
+
+    <!-- 列 2：现状 - 主视图 SpeechBubble + UserBubble -->
+    <div class="col">
+      <div class="col-title">② 现状：主视图 SpeechBubble + UserBubble</div>
+      <div class="col-meta">白底 + 灰边 · rotate 方块尖 · 无头像 · padding 12x16 · 圆角 16 · 用户堆叠 opacity 渐弱</div>
+
+      <div class="section-head">AI 气泡（泡尾下指白鼬）</div>
+      <div class="main-ai-wrap">
+        <div class="main-ai">那你也去做点让自己没那么难的事吧，写两句就行。</div>
+        <div class="main-ai-tail"></div>
+      </div>
+
+      <div class="main-stoat">🐾</div>
+
+      <div class="section-head">用户气泡（右下堆叠，最新最亮）</div>
+      <div class="main-user-stack">
+        <div class="main-user op35">没办法写</div>
+        <div class="main-user op65">脑子糊</div>
+        <div class="main-user">我不想写作业</div>
+      </div>
+
+      <div class="callout">
+        <b>视觉特点：</b>无头像 + 白底 + 方块尖 + 用户气泡小而堆叠。<br>
+        配合居中白鼬做"漫画气泡"，是产品差异化核心。
+      </div>
+    </div>
+
+    <!-- 列 3：统一方案 -->
+    <div class="col">
+      <div class="col-title">③ 统一方案：共用样式 + props 分叉</div>
+      <div class="col-meta">一套 &lt;Bubble&gt; 组件 · 颜色/圆角/padding 统一 · 只通过 avatar / tail props 分叉</div>
+
+      <div class="section-head">统一后：AI 气泡（两视图共用）</div>
+      <!-- 历史视图 variant：有头像，无泡尾 -->
+      <div class="v3-row left" style="margin-left: 0;">
+        <div class="avatar">🐾</div>
+        <div class="v3-ai-wrap" style="margin-left: 0;">
+          <div class="v3-ai">嗯，今天感觉怎么样？</div>
+        </div>
+      </div>
+      <div class="v3-row right">
+        <div class="v3-user">还行</div>
+      </div>
+      <div class="v3-row left" style="margin-left: 0;">
+        <div class="avatar">🐾</div>
+        <div class="v3-ai-wrap" style="margin-left: 0;">
+          <div class="v3-ai">那先别纠结，等你有气再说。</div>
+        </div>
+      </div>
+
+      <div class="section-head">统一后：主视图（带泡尾，无头像）</div>
+      <div class="v3-ai-wrap with-tail-mode">
+        <div class="v3-ai">那你也去做点让自己没那么难的事吧。</div>
+        <div class="v3-ai-tail"></div>
+      </div>
+      <div class="main-stoat">🐾</div>
+
+      <div class="callout" style="background: hsl(202, 45%, 93%); border-color: var(--color-primary);">
+        <b>改什么：</b><br>
+        • 历史视图 AI 气泡底色从淡冰蓝 → 白（`--color-surface`）<br>
+        • 历史视图 AI 边框色从冰蓝 → 灰（`--color-line`）<br>
+        • 历史视图 AI 圆角从 14 → 16、padding 10x14 → 12x16<br>
+        • 历史视图 AI 去掉斜角尖（borderBottomLeftRadius: 4）——无尖即可<br>
+        • 历史视图 用户气泡 padding/fontSize 对齐主视图（但保留不堆叠的单条样式）<br>
+        • 主视图 SpeechBubble 保持现状（泡尾 + 无头像）<br>
+        <br>
+        <b>不改：</b> 主视图 UserBubble 的"堆叠 opacity 渐弱"——这是漫画气泡场景的特色，别动。
+      </div>
+    </div>
+
+  </div>
+
+  <div class="callout" style="margin-top: 24px; max-width: 900px;">
+    <b>注意一个不明显的点：</b>现状 ① 的冰蓝底色其实跟 design-tokens 的 accent-soft 是一致的——它并不"错"，只是和 ② 相比显得"温度不一样"。
+    如果你觉得 ① 其实还行，那 C-4 的"统一"可以改成更轻的方案：<b>历史 ChatBubble 只调 padding/圆角/fontSize 对齐主视图，颜色照旧</b>（保留冰蓝作为"历史视图的节奏变化"）。
+    <br><br>
+    想看"最小改动"版的？我可以再出一版。
+  </div>
+</div>
+</body>
+</html>
+</content>

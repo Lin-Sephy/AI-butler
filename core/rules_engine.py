@@ -1,18 +1,14 @@
-"""规则引擎 v4：Python 主导任务触发判断 + 守门校验。
+"""规则引擎（v4 遗留的纯逻辑工具）。
 
-核心变化：
-- 新增 should_trigger_task()：根据 DS 信号 + 精力 + 任务栏决定是否触发推任务
-- 守门校验保留，只在 call_task 结果上做
-- check_energy_drift 改用信号里的 energy_impression
+v5 架构变了：聊天 / 计划双模式走 function calling，不再用 v4 的"call_chat 出信号 →
+规则引擎判断 → call_task 推任务"三段式。本文件里的函数在 v5 里**都不被生产路径调用**，
+纯作为 L1 单测保护的逻辑残留。彻底砍看死代码清单 #5 / #8 / #11。
 """
-
-import random
-
 
 # ---- 任务触发判断 ----
 
-def should_trigger_task(signal: dict, energy_level: int, task_board: list[dict]) -> bool:
-    """根据 DS 聊天信号 + 精力 + 任务栏，判断是否需要触发第二次调用（推任务）。
+def should_trigger_task(signal: dict) -> bool:
+    """根据 DS 聊天信号判断是否需要触发推任务（v4 遗留，v5 未调用，保留供未来规则引擎参考）。
 
     保守策略：不确定时不触发。
 
@@ -53,26 +49,6 @@ def should_trigger_task(signal: dict, energy_level: int, task_board: list[dict])
     return False
 
 
-def find_matching_task(mentioned_activity: str, task_board: list[dict]) -> dict | None:
-    """在任务栏中查找与用户提到的事项匹配的任务。
-
-    用于"做完 xx 了"场景：自动关联到进行中的任务。
-    """
-    if not mentioned_activity or not task_board:
-        return None
-
-    activity = mentioned_activity.lower()
-    for task in task_board:
-        keyword = (task.get("keyword") or "").lower()
-        if not keyword:
-            continue
-        # 简单匹配：包含关系
-        if activity in keyword or keyword in activity:
-            return task
-
-    return None
-
-
 # ---- 精力规则（守门校验用） ----
 
 ENERGY_RULES = {
@@ -104,7 +80,7 @@ def build_fallback(energy_level: int) -> str:
 def validate_reply(task_response: dict, energy_level: int) -> tuple[bool, str]:
     """检查任务推荐是否违反精力规则。返回 (is_valid, final_reply)。
 
-    仅在 call_task 的结果上调用。
+    v4 遗留：v5 不再调用，保留纯函数供未来参考。
     """
     reply = task_response.get("reply", "")
     task_kw = task_response.get("task_keyword", "") or ""
@@ -152,18 +128,3 @@ def should_show_action_buttons(task_response: dict) -> bool:
     """任务推荐给出了具体行动关键词时展示 开始/换一个 按钮。"""
     task_kw = task_response.get("task_keyword")
     return bool(task_kw and str(task_kw).strip())
-
-
-# ---- "换一个"追问消息池 ----
-
-FOLLOW_UP_MESSAGES = [
-    "没关系，是什么让你不想做这个？",
-    "好的，跟我说说你现在更想做什么？",
-    "不想做就不做。你现在是累了想休息，还是想换件别的事？",
-    "收到，那你现在最想做的事是什么？不管是什么都可以说。",
-]
-
-
-def get_follow_up() -> str:
-    """获取一条随机追问消息。"""
-    return random.choice(FOLLOW_UP_MESSAGES)

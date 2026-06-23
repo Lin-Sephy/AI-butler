@@ -5,6 +5,12 @@
 - 深入印象：触发 3 次以上且跨 2 天，才升级并传给 DS
 - 衰减：初步 7 天过期删除，深入 14 天未触发降级（高频 30 天）
 - 矛盾检测：DS 在提取时判断已有印象是否被推翻
+
+v2 多用户改造（2026-04-15）：所有 DB 接触的函数加 user_id。
+纯计算函数（_format_existing_impressions / _apply_decay / _extract_keywords）不变。
+
+2026-04-22 清理：`session_summary` 死代码清掉（v5 已由 ai_memo 印象 + daily_memo 接管，
+                  生成端残留没持久化也没读回，详见 `docs/功能去留清单.md`）。
 """
 
 import json
@@ -17,6 +23,7 @@ import config
 from db.database import (
     get_ai_memo, save_ai_memo,
     get_daily_memo, save_daily_memo, now_cn,
+    get_companion_name,
 )
 
 # ---- 印象系统参数 ----
@@ -27,16 +34,14 @@ DRAFT_EXPIRE_DAYS = 7       # 初步印象 7 天没触发就删
 CONFIRMED_DECAY_DAYS = 14   # 深入印象 14 天没触发就降级
 HIGH_FREQ_THRESHOLD = 10    # 触发 10 次以上，衰减期延长
 HIGH_FREQ_DECAY_DAYS = 30
+MAX_IMPRESSIONS_IN_PROMPT = 15  # 传给聊天 DS 的印象上限（按 updated_at 最近取），防老用户 token 膨胀 + attention 稀释
 
 # ---- 提取 Prompt ----
 
-EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印象，并判断已有印象是否被强化或推翻。同时生成一份对话摘要。
+EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印象，并判断已有印象是否被强化或推翻。
 
 已有印象：
 {existing_impressions}
-
-上一轮对话摘要：
-{previous_summary}
 
 返回 JSON，不要包含其他内容：
 {{
@@ -46,8 +51,7 @@ EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印
   "daily": {{
     "emotion": {{"value": "情绪", "source": "原因"}} 或 null,
     "current_task": "在做的事" 或 null
-  }},
-  "session_summary": "用2-3句话概括当前对话的整体状态：聊了什么话题、用户情绪和意图、有什么待办或决定。要涵盖之前的摘要内容，不要丢失旧信息"
+  }}
 }}
 
 规则：
@@ -58,34 +62,42 @@ EXTRACT_PROMPT = """你是一个观察者。从对话中提取你对用户的印
 - 已有印象与当前对话矛盾时放入 contradicted
 - 没有新发现时 new_impressions 为空数组
 - daily 是当前状态快照：emotion 是此刻情绪，current_task 是当前在做的事
-- 如果对话中没有情绪或任务相关信息，daily 对应字段填 null
-- session_summary 必须始终填写，即使对话很短"""
+- 如果对话中没有情绪或任务相关信息，daily 对应字段填 null"""
 
 
 # ---- 印象存取 ----
 
-def _get_impressions() -> list[dict]:
-    """从 ai_memo 读取印象列表。兼容旧格式（纯文本直接丢弃）。"""
-    raw = get_ai_memo()
+def _get_impressions(user_id: str, ai_memo_raw: str | None = None) -> list[dict]:
+    """从 ai_memo 读取印象列表。
+
+    ai_memo_raw：调用方已经有原始字符串时可传入，避免重复查库。
+    _save_impressions 是唯一写入点，总是写合法 JSON。读脏数据/意外格式时返 []，不崩。
+    """
+    raw = ai_memo_raw if ai_memo_raw is not None else get_ai_memo(user_id)
     if not raw:
         return []
     try:
-        data = json.loads(raw)
-        if isinstance(data, dict) and "impressions" in data:
-            return data["impressions"]
-        return []
-    except json.JSONDecodeError:
+        return json.loads(raw).get("impressions", []) or []
+    except (json.JSONDecodeError, AttributeError):
         return []
 
 
-def _save_impressions(impressions: list[dict]) -> None:
+def _save_impressions(user_id: str, impressions: list[dict]) -> None:
     """保存印象列表到 ai_memo。"""
-    save_ai_memo(json.dumps({"impressions": impressions}, ensure_ascii=False))
+    save_ai_memo(user_id, json.dumps({"impressions": impressions}, ensure_ascii=False))
 
 
-def get_confirmed_impressions_text() -> str:
-    """获取印象的可读文本，传给聊天 prompt。confirmed 和 draft 都传，标注区分。"""
-    impressions = _get_impressions()
+def get_confirmed_impressions_text(user_id: str, ai_memo_raw: str | None = None) -> str:
+    """获取印象的可读文本，传给聊天 prompt。confirmed 和 draft 都传，标注区分。
+
+    ai_memo_raw：调用方已经有原始字符串时可传入，避免重复查库。
+    按 updated_at 降序取最近 MAX_IMPRESSIONS_IN_PROMPT 条——老用户累积越多越不该全塞。
+    """
+    impressions = _get_impressions(user_id, ai_memo_raw=ai_memo_raw)
+    if not impressions:
+        return ""
+    impressions.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+    impressions = impressions[:MAX_IMPRESSIONS_IN_PROMPT]
     confirmed = [imp for imp in impressions if imp.get("level") == "confirmed"]
     drafts = [imp for imp in impressions if imp.get("level") == "draft"]
     if not confirmed and not drafts:
@@ -98,9 +110,9 @@ def get_confirmed_impressions_text() -> str:
     return "背景参考（仅供你内心判断用，不要在对话中直接提及）：\n" + "\n".join(lines)
 
 
-def get_impressions_display() -> str:
+def get_impressions_display(user_id: str) -> str:
     """获取印象的展示文本（侧边栏用）。"""
-    impressions = _get_impressions()
+    impressions = _get_impressions(user_id)
     if not impressions:
         return ""
     confirmed = [imp for imp in impressions if imp.get("level") == "confirmed"]
@@ -114,8 +126,23 @@ def get_impressions_display() -> str:
     return "\n".join(parts)
 
 
+def _maybe_promote(imp: dict, now_str: str, via: str = "") -> bool:
+    """Draft 印象达到阈值（count≥3 且 跨≥2 天）则升级为 confirmed。返回是否升级。"""
+    if imp.get("level") != "draft":
+        return False
+    count = imp.get("count", 1)
+    days = len(imp.get("trigger_days", []))
+    if count < CONFIRM_THRESHOLD or days < CONFIRM_MIN_DAYS:
+        return False
+    imp["level"] = "confirmed"
+    imp["promoted_at"] = now_str
+    suffix = f"（{via}）" if via else ""
+    logging.info(f"[Memory] 印象升级为 confirmed{suffix}: {imp['content']}")
+    return True
+
+
 def _format_existing_impressions(impressions: list[dict]) -> str:
-    """格式化已有印象列表传给提取 prompt。"""
+    """格式化已有印象列表传给提取 prompt。纯计算，不接 DB。"""
     if not impressions:
         return "（暂无已有印象）"
     lines = []
@@ -127,19 +154,24 @@ def _format_existing_impressions(impressions: list[dict]) -> str:
 
 # ---- 核心流程 ----
 
-def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
-    """从对话中提取印象 + 更新每日快照 + 生成会话摘要。
+def extract_and_update(user_id: str, chat_history: list) -> dict:
+    """从对话中提取印象 + 更新每日快照。
 
-    返回 {"updated": bool, "session_summary": str}
+    返回 {"updated": bool}
     """
     if not config.DEEPSEEK_API_KEY or not chat_history:
-        return {"updated": False, "session_summary": previous_summary}
+        return {"updated": False}
 
-    impressions = _get_impressions()
+    impressions = _get_impressions(user_id)
+
+    try:
+        companion_name = get_companion_name(user_id)
+    except Exception:
+        companion_name = "小白"
 
     recent = chat_history[-20:]
     conv_text = "\n".join(
-        f"{'用户' if m['role'] == 'user' else '小白'}: {m['content']}"
+        f"{'用户' if m['role'] == 'user' else companion_name}: {m['content']}"
         for m in recent if m["role"] in ("user", "assistant")
     )
 
@@ -153,7 +185,6 @@ def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
 
         prompt = EXTRACT_PROMPT.format(
             existing_impressions=_format_existing_impressions(impressions),
-            previous_summary=previous_summary or "（暂无）",
         )
 
         resp = client.chat.completions.create(
@@ -172,7 +203,7 @@ def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
 
     except Exception as e:
         logging.error(f"[Memory] 提取失败: {type(e).__name__}: {e}")
-        return {"updated": False, "session_summary": previous_summary}
+        return {"updated": False}
 
     now = now_cn()
     today = now.strftime("%Y-%m-%d")
@@ -225,35 +256,26 @@ def extract_and_update(chat_history: list, previous_summary: str = "") -> dict:
 
     # 检查升级条件
     for imp in impressions:
-        if imp.get("level") == "draft":
-            count = imp.get("count", 1)
-            days = len(imp.get("trigger_days", []))
-            if count >= CONFIRM_THRESHOLD and days >= CONFIRM_MIN_DAYS:
-                imp["level"] = "confirmed"
-                imp["promoted_at"] = now_str
-                logging.info(f"[Memory] 印象升级为 confirmed: {imp['content']}")
-                updated = True
+        if _maybe_promote(imp, now_str):
+            updated = True
 
     # 衰减/过期
     impressions = _apply_decay(impressions, now)
 
     if updated:
-        _save_impressions(impressions)
+        _save_impressions(user_id, impressions)
 
     # 每日快照
     daily = result.get("daily", {})
     if daily:
-        _update_daily_memo(daily)
+        _update_daily_memo(user_id, daily)
         updated = True
 
-    # 会话摘要
-    session_summary = result.get("session_summary", "") or previous_summary
-
-    return {"updated": updated, "session_summary": session_summary}
+    return {"updated": updated}
 
 
 def _apply_decay(impressions: list[dict], now) -> list[dict]:
-    """应用衰减规则，返回清理后的印象列表。"""
+    """应用衰减规则，返回清理后的印象列表。纯计算，不接 DB。"""
     result = []
     for imp in impressions:
         updated_at = imp.get("updated_at")
@@ -284,12 +306,12 @@ def _apply_decay(impressions: list[dict], now) -> list[dict]:
 
 # ---- 每日快照（简化版：只有 emotion + current_task） ----
 
-def _update_daily_memo(daily_data: dict) -> None:
+def _update_daily_memo(user_id: str, daily_data: dict) -> None:
     """覆盖式更新每日快照。"""
     now_str = now_cn().strftime("%Y-%m-%d %H:%M")
 
     try:
-        current = json.loads(get_daily_memo())
+        current = json.loads(get_daily_memo(user_id))
     except (json.JSONDecodeError, TypeError):
         current = {}
 
@@ -306,13 +328,17 @@ def _update_daily_memo(daily_data: dict) -> None:
             "updated_at": now_str,
         }
 
-    save_daily_memo(json.dumps(current, ensure_ascii=False))
+    save_daily_memo(user_id, json.dumps(current, ensure_ascii=False))
 
 
-def get_filtered_daily_memo() -> str:
-    """获取过滤后的每日记忆，返回可读文本。"""
+def get_filtered_daily_memo(user_id: str, daily_memo_raw: str | None = None) -> str:
+    """获取过滤后的每日记忆，返回可读文本。
+
+    daily_memo_raw：调用方已经有原始字符串时可传入，避免重复查库。
+    """
+    raw = daily_memo_raw if daily_memo_raw is not None else get_daily_memo(user_id)
     try:
-        current = json.loads(get_daily_memo())
+        current = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return ""
 
@@ -357,9 +383,9 @@ def get_filtered_daily_memo() -> str:
 
 # ---- 关键词匹配（零 API 成本） ----
 
-def bump_on_mention(user_input: str) -> None:
+def bump_on_mention(user_id: str, user_input: str) -> None:
     """用户输入命中已有印象关键词时，更新时间戳+计数。"""
-    impressions = _get_impressions()
+    impressions = _get_impressions(user_id)
     if not impressions:
         return
 
@@ -382,29 +408,23 @@ def bump_on_mention(user_input: str) -> None:
 
     # 检查升级
     for imp in impressions:
-        if imp.get("level") == "draft":
-            count = imp.get("count", 1)
-            days = len(imp.get("trigger_days", []))
-            if count >= CONFIRM_THRESHOLD and days >= CONFIRM_MIN_DAYS:
-                imp["level"] = "confirmed"
-                imp["promoted_at"] = now_str
-                logging.info(f"[Memory] 印象通过关键词匹配升级: {imp['content']}")
+        _maybe_promote(imp, now_str, via="关键词匹配")
 
-    _save_impressions(impressions)
+    _save_impressions(user_id, impressions)
     logging.info("[Memory] 关键词命中，已更新印象计数")
 
 
 def _extract_keywords(text: str) -> list[str]:
-    """从文本中提取 2 字以上的关键词片段用于匹配。"""
+    """从文本中提取 2 字以上的关键词片段用于匹配。纯计算，不接 DB。"""
     segments = re.split(r'[，。、！？\s,.\-/()（）]+', text)
     return [s for s in segments if len(s) >= 2]
 
 
-# ---- 兼容旧接口 ----
+# ---- 入口接口 ----
 
-def update_ai_memory(chat_history: list, previous_summary: str = "") -> dict:
-    """入口函数：提取印象 + 每日快照 + 会话摘要。
+def update_ai_memory(user_id: str, chat_history: list) -> dict:
+    """入口函数：提取印象 + 每日快照。
 
-    返回 {"updated": bool, "session_summary": str}
+    返回 {"updated": bool}
     """
-    return extract_and_update(chat_history, previous_summary=previous_summary)
+    return extract_and_update(user_id, chat_history)

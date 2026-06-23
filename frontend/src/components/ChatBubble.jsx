@@ -1,0 +1,67 @@
+/**
+ * 聊天气泡组件。用户侧右对齐，小白侧左对齐 + 头像。
+ * 历史视图下 ChatPage 的 HistoryView 使用。
+ */
+
+import stoatSrc from '../assets/stoat-front.svg'
+import { renderAssistantText } from '../lib/text.jsx'
+
+export default function ChatBubble({ message }) {
+  const isUser = message.role === 'user'
+  const content = isUser ? message.content : renderAssistantText(message.content)
+
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: isUser ? 'flex-end' : 'flex-start',
+      gap: 8,
+      marginBottom: 14,
+      alignItems: 'flex-end',
+    }}>
+      {!isUser && <Avatar />}
+
+      <div style={{ maxWidth: '75%' }}>
+        <div style={{
+          padding: '10px 14px',
+          borderRadius: 14,
+          fontSize: 14,
+          lineHeight: 1.5,
+          background: isUser ? 'var(--color-primary)' : 'var(--color-accent-soft)',
+          color: isUser ? '#fff' : 'var(--color-text)',
+          border: isUser ? '1px solid var(--color-primary)' : '1px solid var(--color-accent)',
+          borderBottomRightRadius: isUser ? 4 : 14,
+          borderBottomLeftRadius: isUser ? 14 : 4,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}>
+          {content}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Avatar() {
+  // 小头像：用同一张 stoat SVG，容器 32x32 只露头部（约图高的 35%）
+  return (
+    <div style={{
+      width: 32, height: 32, borderRadius: '50%',
+      background: 'white',
+      border: '1px solid var(--color-line)',
+      flexShrink: 0,
+      overflow: 'hidden',
+      lineHeight: 0,
+    }}>
+      <img
+        src={stoatSrc}
+        alt="小白"
+        style={{
+          width: '120%',
+          marginLeft: '-10%',
+          marginTop: '-2%',
+          display: 'block',
+        }}
+      />
+    </div>
+  )
+}
